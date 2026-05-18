@@ -147,6 +147,20 @@ describe('isTokenLimitError (pure helper)', () => {
     expect(isTokenLimitError(new Error('Batch contains too many tokens'))).toBe(true);
   });
 
+  test('matches OpenAI/litellm "maximum request size" variant', () => {
+    // Real error format from in-cluster litellm proxy fronting OpenAI; this
+    // is the failure mode that prompted #1080. The wrapper text
+    // ("litellm.BadRequestError: OpenAIException - Error code: 400 - ...")
+    // surrounds the JSON body which contains the matched phrase.
+    const litellmError = new Error(
+      "litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message': \"Invalid 'input': maximum request size is 300000 tokens per request.\"}}",
+    );
+    expect(isTokenLimitError(litellmError)).toBe(true);
+
+    // The shorter native-OpenAI form.
+    expect(isTokenLimitError(new Error('maximum request size is 300000 tokens per request'))).toBe(true);
+  });
+
   test('does not match unrelated errors', () => {
     expect(isTokenLimitError(new Error('Connection refused'))).toBe(false);
     expect(isTokenLimitError(new Error('Invalid API key'))).toBe(false);

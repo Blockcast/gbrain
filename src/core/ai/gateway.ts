@@ -1117,7 +1117,14 @@ export function isTokenLimitError(err: unknown): boolean {
   return (
     /max.*allowed.*tokens.*batch/i.test(msg) ||
     /batch.*too.*many.*tokens/i.test(msg) ||
-    /token.*limit.*exceeded/i.test(msg)
+    /token.*limit.*exceeded/i.test(msg) ||
+    // OpenAI/Azure/litellm-proxied-OpenAI report oversize embed requests as
+    // `Invalid 'input': maximum request size is N tokens per request.`
+    // Real-world hit: vendored chip-register .h files at >300K tokens
+    // (verified against in-cluster litellm proxy). Recursive halving in
+    // embedSubBatch needs to recognize this so the page isn't dropped.
+    /maximum request size.*tokens/i.test(msg) ||
+    /max.*request size.*tokens/i.test(msg)
   );
 }
 
