@@ -10,6 +10,7 @@ import { clampSearchLimit } from './engine.ts';
 import type { GBrainConfig } from './config.ts';
 import type { PageType } from './types.ts';
 import { importFromContent } from './import-file.ts';
+import { serializeMarkdown } from './markdown.ts';
 import { hybridSearch, hybridSearchCached } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { dedupResults } from './search/dedup.ts';
@@ -444,7 +445,22 @@ const get_page: Operation = {
           ),
         }
       : page;
-    return { ...visibleBody, tags, ...(resolved_slug ? { resolved_slug } : {}) };
+    // Round-trip the parsed page back to its raw markdown form so callers that
+    // expect a put_page-shaped string (frontmatter + body) can consume the
+    // response without reconstructing it themselves. Surfaced via paperclip's
+    // BLO-6388 sweep-wake gate: gate's parseSweepWakeFramePage expected a
+    // `content` or `body` string field on the response, but get_page only
+    // exposed parsed `frontmatter` + `compiled_truth`. Gate parsed null →
+    // missing_or_invalid_frame → re-seed loop. Reconstructed `content` here
+    // uses the (possibly-stripped) `visibleBody.compiled_truth` so the same
+    // privacy boundary applies.
+    const content = serializeMarkdown(
+      (visibleBody.frontmatter ?? {}) as Record<string, unknown>,
+      visibleBody.compiled_truth ?? '',
+      visibleBody.timeline ?? '',
+      { type: visibleBody.type, title: visibleBody.title, tags },
+    );
+    return { ...visibleBody, tags, content, ...(resolved_slug ? { resolved_slug } : {}) };
   },
   scope: 'read',
   cliHints: { name: 'get', positional: ['slug'] },
