@@ -551,6 +551,14 @@ export class PostgresEngine implements BrainEngine {
 
   // Pages CRUD
   async getPage(slug: string, opts?: { sourceId?: string; includeDeleted?: boolean }): Promise<Page | null> {
+    // Symmetric normalization with putPage (slugs are case-insensitive by
+    // repo convention; putPage lowercases via validateSlug). Without this,
+    // a caller passing an uppercase slug missed pages stored at the
+    // putPage-normalized lowercase key. Surfaced as BLO-6388 server-side
+    // sweep gate seeding `paperclip/decisions/.../BLO-3668` (persisted as
+    // `.../blo-3668`) then re-reading at the uppercase slug → page_not_found
+    // → 0% skip verdicts on a working seed-frame fix.
+    slug = validateSlug(slug);
     const sql = this.sql;
     const includeDeleted = opts?.includeDeleted === true;
     const sourceId = opts?.sourceId;

@@ -490,6 +490,9 @@ export class PGLiteEngine implements BrainEngine {
 
   // Pages CRUD
   async getPage(slug: string, opts?: { sourceId?: string; includeDeleted?: boolean }): Promise<Page | null> {
+    // Symmetric normalization with putPage (validateSlug lowercases).
+    // See postgres-engine.ts:getPage for the BLO-6388 context.
+    slug = validateSlug(slug);
     // v0.26.5: hide soft-deleted by default; opt-in via opts.includeDeleted.
     const includeDeleted = opts?.includeDeleted === true;
     const sourceId = opts?.sourceId;

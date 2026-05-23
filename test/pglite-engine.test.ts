@@ -164,6 +164,22 @@ describe('PGLiteEngine: Pages', () => {
     const page = await engine.putPage('Test/UPPER', testPage);
     expect(page.slug).toBe('test/upper');
   });
+
+  test('getPage is case-insensitive (symmetric with putPage)', async () => {
+    // Regression: putPage normalizes to lowercase via validateSlug, but
+    // pre-fix getPage took the slug raw — so a caller writing `Foo/BAR`
+    // and reading `Foo/BAR` got `null` because the row sat at `foo/bar`.
+    // Surfaced as the BLO-6388 server-side sweep-wake gate: 12h of
+    // `seedWritten:true` log lines while every next-sweep `get_page` of
+    // the same uppercase slug returned page_not_found → 0% skip verdicts.
+    await engine.putPage('Mixed/CaseSlug', testPage);
+    const lower = await engine.getPage('mixed/caseslug');
+    const upper = await engine.getPage('Mixed/CaseSlug');
+    const mixed = await engine.getPage('MIXED/caseslug');
+    expect(lower?.slug).toBe('mixed/caseslug');
+    expect(upper?.slug).toBe('mixed/caseslug');
+    expect(mixed?.slug).toBe('mixed/caseslug');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
