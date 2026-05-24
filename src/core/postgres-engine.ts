@@ -943,6 +943,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async deletePage(slug: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     await sql`DELETE FROM pages WHERE slug = ${slug} AND source_id = ${sourceId}`;
@@ -996,6 +997,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async softDeletePage(slug: string, opts?: { sourceId?: string }): Promise<{ slug: string } | null> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId;
     // Idempotent-as-null contract: only flip rows that are currently active.
@@ -1011,6 +1013,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async restorePage(slug: string, opts?: { sourceId?: string }): Promise<boolean> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId;
     const sourceCondition = sourceId ? sql`AND source_id = ${sourceId}` : sql``;
@@ -1983,6 +1986,7 @@ export class PostgresEngine implements BrainEngine {
 
   // Chunks
   async upsertChunks(slug: string, chunks: ChunkInput[], opts?: { sourceId?: string } & BatchOpts): Promise<void> {
+    slug = validateSlug(slug);
     return this.batchRetry(opts?.auditSite ?? 'upsertChunks', opts?.signal, () => this._upsertChunksOnce(slug, chunks, opts), chunks.length);
   }
 
@@ -2113,6 +2117,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getChunks(slug: string, opts?: { sourceId?: string }): Promise<Chunk[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     const rows = await sql`
@@ -2336,6 +2341,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async deleteChunks(slug: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     await sql`
@@ -2483,6 +2489,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getLinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     // v0.31.8 (D16): two-branch query. Without opts.sourceId, no source filter
     // (preserves pre-v0.31.8 cross-source semantics). With opts.sourceId,
@@ -2514,6 +2521,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getBacklinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     // v0.31.8 (D16): two-branch query, mirrors getLinks above.
     if (opts?.sourceId) {
@@ -2577,6 +2585,7 @@ export class PostgresEngine implements BrainEngine {
     depth: number = 5,
     opts?: import('./engine.ts').TraverseGraphOpts,
   ): Promise<GraphNode[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     // v0.34.1 (#861 — P0 leak seal): scope visited nodes to the caller's
     // source(s). Without this, the walk follows edges into pages from
@@ -2984,6 +2993,7 @@ export class PostgresEngine implements BrainEngine {
 
   // Tags
   async addTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     // Verify page exists before attempting insert (ON CONFLICT DO NOTHING
@@ -3000,6 +3010,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async removeTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     await sql`
@@ -3010,6 +3021,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getTags(slug: string, opts?: { sourceId?: string }): Promise<string[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     const rows = await sql`
@@ -3073,6 +3085,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getTimeline(slug: string, opts?: TimelineOpts): Promise<TimelineEntry[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const limit = opts?.limit || 100;
     // v0.31.8 (D16): branch on every combination of (after, before, sourceId).
@@ -4280,6 +4293,7 @@ export class PostgresEngine implements BrainEngine {
 
   // Versions
   async createVersion(slug: string, opts?: { sourceId?: string }): Promise<PageVersion> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     const sourceId = opts?.sourceId ?? 'default';
     const rows = await sql`
@@ -4293,6 +4307,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getVersions(slug: string, opts?: { sourceId?: string }): Promise<PageVersion[]> {
+    slug = validateSlug(slug);
     const sql = this.sql;
     // v0.31.8 (D16): two-branch.
     if (opts?.sourceId) {
@@ -4636,6 +4651,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getChunksWithEmbeddings(slug: string, opts?: { sourceId?: string }): Promise<Chunk[]> {
+    slug = validateSlug(slug);
     const conn = this.sql;
     const sourceId = opts?.sourceId;
     const rows = sourceId
