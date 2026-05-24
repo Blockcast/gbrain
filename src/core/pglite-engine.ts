@@ -561,6 +561,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async deletePage(slug: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     await this.db.query(
       'DELETE FROM pages WHERE slug = $1 AND source_id = $2',
@@ -569,6 +570,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async softDeletePage(slug: string, opts?: { sourceId?: string }): Promise<{ slug: string } | null> {
+    slug = validateSlug(slug);
     // Idempotent-as-null: only flip rows currently active. Source filter is
     // optional; without it the first matching row across sources gets soft-deleted.
     const sourceId = opts?.sourceId;
@@ -587,6 +589,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async restorePage(slug: string, opts?: { sourceId?: string }): Promise<boolean> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId;
     const where: string[] = ['slug = $1', 'deleted_at IS NOT NULL'];
     const params: unknown[] = [slug];
@@ -1151,6 +1154,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Chunks
   async upsertChunks(slug: string, chunks: ChunkInput[], opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
 
     // Source-scope the page-id lookup so duplicate slugs in different sources
@@ -1261,6 +1265,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getChunks(slug: string, opts?: { sourceId?: string }): Promise<Chunk[]> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     const { rows } = await this.db.query(
       `SELECT cc.* FROM content_chunks cc
@@ -1296,6 +1301,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async deleteChunks(slug: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Source-qualify the page-id subquery; slugs are only unique per source.
     await this.db.query(
@@ -1431,6 +1437,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getLinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
+    slug = validateSlug(slug);
     // v0.31.8 (D16): two-branch query. Without opts.sourceId, no source filter
     // (preserves pre-v0.31.8 cross-source semantics for back-link validators
     // and read-side op handlers that haven't threaded sourceId yet). With
@@ -1465,6 +1472,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getBacklinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
+    slug = validateSlug(slug);
     // v0.31.8 (D16): two-branch query. See getLinks() comment.
     if (opts?.sourceId) {
       const { rows } = await this.db.query(
@@ -1520,6 +1528,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async traverseGraph(slug: string, depth: number = 5): Promise<GraphNode[]> {
+    slug = validateSlug(slug);
     // Cycle prevention: visited array tracks page IDs already in the path.
     // Prevents exponential blowup on cyclic subgraphs (e.g., A->B->A).
     const { rows } = await this.db.query(
@@ -1758,6 +1767,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Tags
   async addTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Pre-check source-scoped page existence; ON CONFLICT only handles the
     // already-tagged case, not missing pages.
@@ -1775,6 +1785,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async removeTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Source-qualify the page-id subquery; slugs are only unique per source.
     await this.db.query(
@@ -1786,6 +1797,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getTags(slug: string, opts?: { sourceId?: string }): Promise<string[]> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Source-qualify the page-id subquery; slugs are only unique per source.
     const { rows } = await this.db.query(
@@ -1847,6 +1859,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getTimeline(slug: string, opts?: TimelineOpts): Promise<TimelineEntry[]> {
+    slug = validateSlug(slug);
     // v0.31.8 (D16): build WHERE clause dynamically so opts.sourceId composes
     // cleanly with the existing after/before filters. Without sourceId, no
     // source filter applies (preserves pre-v0.31.8 cross-source semantics).
@@ -2909,6 +2922,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Versions
   async createVersion(slug: string, opts?: { sourceId?: string }): Promise<PageVersion> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     const { rows } = await this.db.query(
       `INSERT INTO page_versions (page_id, compiled_truth, frontmatter)
@@ -2922,6 +2936,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getVersions(slug: string, opts?: { sourceId?: string }): Promise<PageVersion[]> {
+    slug = validateSlug(slug);
     // v0.31.8 (D16): two-branch. Without opts.sourceId, joins return versions
     // for every same-slug page (preserves pre-v0.31.8 cross-source view).
     if (opts?.sourceId) {
@@ -3178,6 +3193,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getChunksWithEmbeddings(slug: string, opts?: { sourceId?: string }): Promise<Chunk[]> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId;
     const { rows } = sourceId
       ? await this.db.query(

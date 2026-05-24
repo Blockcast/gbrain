@@ -180,6 +180,41 @@ describe('PGLiteEngine: Pages', () => {
     expect(upper?.slug).toBe('mixed/caseslug');
     expect(mixed?.slug).toBe('mixed/caseslug');
   });
+
+  test('createVersion is case-insensitive (post-skip frame-update path)', async () => {
+    // Regression: putPage lowercases via validateSlug, but importFromContent
+    // immediately calls createVersion(slug, ...) using the ORIGINAL caller
+    // slug (uppercase). Pre-fix createVersion queried `WHERE slug = ${slug}`
+    // raw → no match → put_page returned isError:true. paperclip's gbrain
+    // client swallowed isError into null → the BLO-6388 gate logged success
+    // while the post-skip frame update never persisted; subsequent sweeps
+    // re-read the stale frame (issueLastActivityAt set to the original seed
+    // timestamp, not the marker time) and reverted to wake-on-every-cycle.
+    await engine.putPage('Mixed/Versioned', testPage);
+    const v1 = await engine.createVersion('Mixed/Versioned');
+    expect(v1.page_id).toBeDefined();
+    const v2 = await engine.createVersion('MIXED/VERSIONED');
+    expect(v2.page_id).toBe(v1.page_id);
+    const versions = await engine.getVersions('mixed/versioned');
+    expect(versions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('all slug read paths resolve case-insensitively', async () => {
+    // Sibling regression for the BLO-6388 cascade: every slug-keyed read
+    // method must round-trip a non-lowercase slug to the same lowercase row
+    // putPage stored, otherwise downstream operations (importFromContent's
+    // post-putPage steps, the gate's read-modify-write cycle, fence reads)
+    // silently miss data.
+    await engine.putPage('Mixed/Reads', { ...testPage, type: 'concept' });
+    await engine.upsertChunks('MIXED/READS', [
+      { chunk_index: 0, chunk_text: 'hello', chunk_source: 'compiled_truth' },
+    ]);
+    await engine.addTag('Mixed/Reads', 'sample');
+    const chunks = await engine.getChunks('MIXED/reads');
+    const tags = await engine.getTags('mixed/Reads');
+    expect(chunks.length).toBe(1);
+    expect(tags).toContain('sample');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
