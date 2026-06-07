@@ -12,6 +12,7 @@ import {
 import { hashToken, generateToken } from '../src/core/utils.ts';
 import { PGLITE_SCHEMA_SQL } from '../src/core/pglite-schema.ts';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
+import { assertScopeAllowedForGrants, ClientCredentialsAdminScopeError } from '../src/core/scope.ts';
 
 // ---------------------------------------------------------------------------
 // Test setup: in-memory PGLite with OAuth tables
@@ -137,6 +138,61 @@ describe('client registration', () => {
     await expect(
       sql`INSERT INTO oauth_clients (client_id, client_name, scope) VALUES (${clientId}, ${'dup'}, ${'read'})`,
     ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BLO-9319: `admin` must not be granted to client_credentials clients
+// ---------------------------------------------------------------------------
+
+describe('client_credentials admin-scope guard (BLO-9319)', () => {
+  describe('assertScopeAllowedForGrants (pure)', () => {
+    test('rejects admin on a client_credentials client', () => {
+      expect(() => assertScopeAllowedForGrants(['read', 'write', 'admin'], ['client_credentials']))
+        .toThrow(ClientCredentialsAdminScopeError);
+    });
+
+    test('empty grant_types defaults to client_credentials (admin rejected)', () => {
+      expect(() => assertScopeAllowedForGrants(['admin'], []))
+        .toThrow(ClientCredentialsAdminScopeError);
+    });
+
+    test('allows read/write/agent on client_credentials', () => {
+      expect(() => assertScopeAllowedForGrants(['read', 'write', 'agent'], ['client_credentials']))
+        .not.toThrow();
+    });
+
+    test('does NOT over-block the granular *_admin siblings on client_credentials', () => {
+      expect(() => assertScopeAllowedForGrants(['read', 'sources_admin', 'users_admin'], ['client_credentials']))
+        .not.toThrow();
+    });
+
+    test('allows admin on a non-client_credentials (authorization_code) client', () => {
+      expect(() => assertScopeAllowedForGrants(['read', 'write', 'admin'], ['authorization_code']))
+        .not.toThrow();
+    });
+  });
+
+  describe('registerClientManual enforcement', () => {
+    test('rejects a client_credentials client requesting admin', async () => {
+      await expect(
+        provider.registerClientManual('cc-admin-attempt', ['client_credentials'], 'read write admin'),
+      ).rejects.toThrow(ClientCredentialsAdminScopeError);
+    });
+
+    test('allows a client_credentials client with the granular *_admin scopes', async () => {
+      const { clientId } = await provider.registerClientManual(
+        'cc-granular-admin', ['client_credentials'], 'read sources_admin users_admin',
+      );
+      expect(clientId).toStartWith('gbrain_cl_');
+    });
+
+    test('allows admin on an authorization_code client', async () => {
+      const { clientId } = await provider.registerClientManual(
+        'authcode-admin', ['authorization_code'], 'read write admin',
+      );
+      expect(clientId).toStartWith('gbrain_cl_');
+    });
   });
 });
 
@@ -974,8 +1030,11 @@ describe('v0.28 ALLOWED_SCOPES allowlist', () => {
 
   test('registerClientManual accepts every canonical scope', async () => {
     for (const scope of ['read', 'write', 'admin', 'sources_admin', 'users_admin']) {
+      // BLO-9319: `admin` is only valid on a non-client_credentials grant; the
+      // allowlist itself (what this test covers) is grant-independent.
+      const grants = scope === 'admin' ? ['authorization_code'] : ['client_credentials'];
       const { clientId } = await provider.registerClientManual(
-        `accept-${scope}`, ['client_credentials'], scope,
+        `accept-${scope}`, grants, scope,
       );
       const client = await provider.clientsStore.getClient(clientId);
       expect(client?.scope).toBe(scope);

@@ -24,7 +24,7 @@ import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/serv
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { hashToken, generateToken, isUndefinedColumnError } from './utils.ts';
-import { hasScope, assertAllowedScopes, parseScopeString, InvalidScopeError } from './scope.ts';
+import { hasScope, assertAllowedScopes, assertScopeAllowedForGrants, parseScopeString, InvalidScopeError } from './scope.ts';
 import type { SqlQuery, SqlValue } from './sql-query.ts';
 export type { SqlQuery, SqlValue };
 
@@ -234,6 +234,9 @@ class GBrainClientsStore implements OAuthRegisteredClientsStore {
     // is on, so this is the security-relevant gate (manual CLI registration
     // is operator-trusted).
     assertAllowedScopes(parseScopeString(client.scope));
+    // BLO-9319: no `admin` on a client_credentials client. grant_types defaults
+    // to client_credentials when absent (matching the storage default below).
+    assertScopeAllowedForGrants(parseScopeString(client.scope), client.grant_types ?? ['client_credentials']);
 
     // v0.41.3 (T5): validate token_endpoint_auth_method on the DCR path so
     // `--enable-dcr` is not the looser entry point. CLI and admin paths gate
@@ -826,6 +829,9 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
     // Pre-allowlist clients keep working (allowlist is registration-time;
     // existing rows aren't re-validated).
     assertAllowedScopes(parseScopeString(scopes));
+    // BLO-9319: no `admin` on a client_credentials client (the CLI + admin SPA
+    // both route here). sources_admin/users_admin stay legal.
+    assertScopeAllowedForGrants(parseScopeString(scopes), grantTypes);
 
     // v0.41.3 (T1+T2): validate token_endpoint_auth_method at the registration
     // boundary. Throws InvalidTokenEndpointAuthMethodError on bad input.

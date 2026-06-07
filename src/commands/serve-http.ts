@@ -27,7 +27,7 @@ import { operations, OperationError } from '../core/operations.ts';
 import type { OperationContext, AuthInfo } from '../core/operations.ts';
 import { GBrainOAuthProvider, validateTokenEndpointAuthMethod } from '../core/oauth-provider.ts';
 import type { SqlQuery } from '../core/oauth-provider.ts';
-import { hasScope, ALLOWED_SCOPES_LIST, normalizeScopesInput } from '../core/scope.ts';
+import { hasScope, ALLOWED_SCOPES_LIST, normalizeScopesInput, assertScopeAllowedForGrants, parseScopeString } from '../core/scope.ts';
 import { summarizeMcpParams, dispatchToolCall } from '../mcp/dispatch.ts';
 import { paramDefToSchema } from '../mcp/tool-defs.ts';
 import { getBrainHotMemoryMeta } from '../core/facts/meta-hook.ts';
@@ -1255,6 +1255,18 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
         return;
       }
       const grants = Array.isArray(grantTypes) && grantTypes.length > 0 ? grantTypes : ['client_credentials'];
+      // BLO-9319: reject `admin` on a client_credentials client with a clean 400
+      // (the provider enforces the same invariant; this keeps the admin SPA from
+      // surfacing it as a generic 500).
+      try {
+        assertScopeAllowedForGrants(parseScopeString(scopeString), grants);
+      } catch (e) {
+        res.status(400).json({
+          error: 'invalid_scopes',
+          message: e instanceof Error ? e.message : String(e),
+        });
+        return;
+      }
       const uris = Array.isArray(redirectUris) ? redirectUris : [];
       // v0.41.3 (T1+T4): validate token_endpoint_auth_method via shared
       // ALLOWED_TOKEN_ENDPOINT_AUTH_METHODS before reaching the provider.
