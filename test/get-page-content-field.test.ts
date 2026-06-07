@@ -60,6 +60,7 @@ function makeCtx(engine: ReturnType<typeof stubEngine>, remote = false): Operati
     remote,
     viaSubagent: false,
     jobId: 1,
+    sourceId: 'default',
   } as OperationContext;
 }
 
