@@ -12,15 +12,16 @@ import type { PageType } from './types.ts';
 import { importFromContent } from './import-file.ts';
 import { writePageThrough } from './write-through.ts';
 import { serializeMarkdown } from './markdown.ts';
-import { hybridSearch, hybridSearchCached } from './search/hybrid.ts';
+import { hybridSearch, hybridSearchCached, stampContentFlags } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { dedupResults } from './search/dedup.ts';
 import { captureEvalCandidate, isEvalCaptureEnabled, isEvalScrubEnabled } from './eval-capture.ts';
 import type { HybridSearchMeta } from './types.ts';
-import { extractPageLinks, isAutoLinkEnabled, isAutoTimelineEnabled, parseTimelineEntries, makeResolver, type UnresolvedFrontmatterRef } from './link-extraction.ts';
+import { extractPageLinks, isAutoLinkEnabled, isAutoTimelineEnabled, isGlobalBasenameEnabled, parseTimelineEntries, makeResolver, type UnresolvedFrontmatterRef } from './link-extraction.ts';
 import { isFactsBackstopEligible } from './facts/eligibility.ts';
 import { stripTakesFence } from './takes-fence.ts';
 import { stripFactsFence } from './facts-fence.ts';
+import { getContentFlag } from './quarantine.ts';
 import { bumpLastRetrievedAt } from './last-retrieved.ts';
 import { isSearchMode } from './search/mode.ts';
 import { stampEvidence } from './search/evidence.ts';
@@ -605,7 +606,19 @@ const get_page: Operation = {
       visibleBody.timeline ?? '',
       { type: visibleBody.type, title: visibleBody.title, tags },
     );
-    return { ...visibleBody, tags, content, ...(resolved_slug ? { resolved_slug } : {}) };
+    // v0.42 (#1699) agent-warning channel: surface the page's content_flag
+    // marker as a top-level field (parallel to SearchResult.content_flag) so
+    // an agent reading a page directly gets the same "this looks odd, examine
+    // it" signal it would get from search. The marker is also in frontmatter;
+    // this is the clean, documented accessor.
+    const content_flag = getContentFlag(page.frontmatter as Record<string, unknown> | null);
+    return {
+      ...visibleBody,
+      tags,
+      content,
+      ...(resolved_slug ? { resolved_slug } : {}),
+      ...(content_flag ? { content_flag } : {}),
+    };
   },
   scope: 'read',
   cliHints: { name: 'get', positional: ['slug'] },
@@ -724,6 +737,10 @@ const put_page: Operation = {
     }
     const result = await importFromContent(ctx.engine, slug, p.content as string, {
       noEmbed,
+      // v0.42 (#1699): untrusted callers can't smuggle gate-owned frontmatter
+      // markers (quarantine/content_flag/embed_skip). Fail-closed — anything
+      // not strictly local is remote (matches CV6 / v0.26.9 F7b posture).
+      remote: ctx.remote !== false,
       ...(ctx.sourceId ? { sourceId: ctx.sourceId } : {}),
       // v0.39.0.0 T1.5: pack-aware type inference (loaded above; legacy
       // inferType behavior when undefined).
@@ -991,9 +1008,14 @@ async function runAutoLink(
     : {};
 
   // Live-mode resolver: per-put throwaway cache, pg_trgm + optional search.
-  const resolver = makeResolver(engine, { mode: 'live' });
+  // Issue #972 (codex [P1]): pass sourceId so basename resolution stays
+  // within this page's source — no cross-source basename edges.
+  const resolver = makeResolver(engine, { mode: 'live', sourceId: opts?.sourceId });
+  // Issue #972: opt-in bare-wikilink basename resolution. Off by default.
+  const globalBasename = await isGlobalBasenameEnabled(engine);
   const { candidates, unresolved } = await extractPageLinks(
     slug, fullContent, parsed.frontmatter, parsed.type, resolver,
+    { globalBasename },
   );
 
   // Resolve which targets exist (skip refs to non-existent pages to avoid FK
@@ -1040,10 +1062,17 @@ async function runAutoLink(
       l => l.link_source === 'frontmatter' && l.origin_slug === slug,
     );
 
-    // Reconcilable outgoing edges: markdown + our own frontmatter edges.
-    // Manual edges (link_source='manual') are NEVER touched by reconciliation.
+    // Reconcilable outgoing edges: markdown + our own frontmatter edges +
+    // basename-resolved wikilinks (issue #972). Manual edges
+    // (link_source='manual') are NEVER touched by reconciliation.
+    // 'wikilink-resolved' MUST be reconcilable (codex outside-voice [P1]):
+    // auto-link writes these; if it weren't here, a basename edge would
+    // survive after the wikilink is deleted from the page OR the
+    // link_resolution.global_basename flag is turned off (out no longer
+    // includes it, so the stale-removal loop below must be allowed to drop it).
     const reconcilableOut = existingOut.filter(
       l => l.link_source === 'markdown' || l.link_source == null ||
+           l.link_source === 'wikilink-resolved' ||
            (l.link_source === 'frontmatter' && l.origin_slug === slug),
     );
 
@@ -1291,6 +1320,10 @@ const search: Operation = {
       const raw = await ctx.engine.searchKeyword(queryText, { limit, offset, ...scope });
       const results = dedupResults(raw);
       stampEvidenceSafe(results);
+      // #1699: the keyword-only opt-out must STILL surface the content_flag
+      // agent-warning channel (hybridSearch stamps it; this branch bypasses
+      // hybridSearch, so stamp explicitly). Fail-open inside the helper.
+      await stampContentFlags(ctx.engine, results);
       bumpLastRetrievedAt(ctx.engine, results.map((r) => r.page_id));
       maybeCaptureSearch(ctx, queryText, results, Date.now() - startedAt, false);
       return results;
@@ -1401,6 +1434,14 @@ const query: Operation = {
         "  Omit / FALSE for breadth — 'everything about X', 'list all', 'what do I know about Y', exploration, brainstorming, or any time you'd rather see more candidates and judge for yourself. Recall matters more there, so take the full top-K.\n" +
         "Safe by construction: it NEVER returns empty when there are matches (you always get at least the top hit), and it only applies to the first page (omit when paginating). Caps come from config (search.adaptive_return_entity_max / _other_max; default 2 / 6) — pass `limit` 1 alongside this for a hard single-answer cap.",
     },
+    autocut: {
+      type: 'boolean',
+      description:
+        "v0.42.3.0 — autocut is the SMART DEFAULT (already ON when the reranker runs, which it does in the default search mode). It returns only the confident cluster by cutting where the relevance score drops off a cliff, so an obvious single answer comes back as 1 result and a genuine handful comes back as that handful — not a fixed wall of 20+.\n" +
+        "  You almost never set this. Pass FALSE only to FORCE the full top-K when you deliberately want breadth — broad exploration, 'show me everything about X', enumeration where you'd rather over-collect and judge for yourself, or when you suspect the top hit is wrong and want to see the alternatives.\n" +
+        "  TRUE is redundant in default mode (it's already on); it only matters to override a brain whose config turned autocut off.\n" +
+        "Safe by construction: never returns empty when there are matches, only applies to the first page (omit when paginating), and is a no-op when no reranker scored the results (so it can't cut on an untrustworthy signal). Distinct from `adaptive_return`: autocut cuts on the score cliff; adaptive_return caps by question intent. Leave both unset for the smart default.",
+    },
   },
   handler: async (ctx, p) => {
     const startedAt = Date.now();
@@ -1495,6 +1536,9 @@ const query: Operation = {
       // v0.41.33 — agent-explicit adaptive return-sizing. Omitted = off
       // (config default applies). hybridSearchCached skips the cache when on.
       adaptiveReturn: typeof p.adaptive_return === 'boolean' ? (p.adaptive_return as boolean) : undefined,
+      // v0.42.3.0 — autocut ceiling override. Omitted = smart default (ON in
+      // reranked modes). `false` forces the full top-K.
+      autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : undefined,
     });
     const latency_ms = Date.now() - startedAt;
 
@@ -1675,6 +1719,11 @@ const think: Operation = {
       save: safeSave,
       take: safeTake,
       model: p.model ? String(p.model) : undefined,
+      // #1698 (C3): a remote caller that explicitly supplies a model gets the same
+      // hard-error-on-unresolvable behavior as the CLI (loud op error envelope),
+      // instead of silently degrading to a no-LLM stub answer. No model param →
+      // false → configured/default model keeps its graceful path.
+      modelExplicit: !!p.model,
       since: p.since ? String(p.since) : undefined,
       until: p.until ? String(p.until) : undefined,
       takesHoldersAllowList: ctx.takesHoldersAllowList,
@@ -1695,7 +1744,9 @@ const think: Operation = {
 
     return {
       ...result,
-      saved_slug: savedSlug ?? null,
+      // #1698 (#10): the persist-skip signal returns slug '' — map it (and any
+      // falsy) to null so callers never see an empty-string "slug".
+      saved_slug: savedSlug || null,
       evidence_inserted: evidenceInserted,
       remote_persisted_blocked: remote && (Boolean(p.save) || Boolean(p.take)),
     };
@@ -1985,12 +2036,29 @@ const get_brain_identity: Operation = {
   params: {},
   handler: async (ctx) => {
     const stats = await ctx.engine.getStats();
+    // v0.42 self-upgrade: surface a pending update on the thin-client banner
+    // (bonus channel; the CLI stderr marker + `gbrain self-upgrade` are the
+    // load-bearing surface). Cache-read-only, no network, fail-open.
+    let update_available = false;
+    let latest_version: string | null = null;
+    try {
+      const su = await import('./self-upgrade.ts');
+      const entry = su.readUpdateCache();
+      if (entry && su.isCacheFresh(entry, Date.now()) && entry.marker.kind === 'upgrade_available') {
+        update_available = true;
+        latest_version = entry.marker.latest ?? null;
+      }
+    } catch {
+      /* never let the banner break the op */
+    }
     return {
       version: VERSION,
       engine: ctx.engine.kind,
       page_count: stats.page_count,
       chunk_count: stats.chunk_count,
       last_sync_iso: null as string | null,
+      update_available,
+      latest_version,
     };
   },
   scope: 'read',
@@ -3700,7 +3768,11 @@ const code_callers: Operation = {
       allSources,
       sourceId,
     });
-    return { symbol, count: edges.length, callers: edges };
+    const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, {
+      kind: 'edge', count: edges.length, sourceId, allSources,
+    });
+    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, callers: edges };
   },
   cliHints: { name: 'code_callers', hidden: true },
 };
@@ -3731,7 +3803,11 @@ const code_callees: Operation = {
       allSources,
       sourceId,
     });
-    return { symbol, count: edges.length, callees: edges };
+    const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, {
+      kind: 'edge', count: edges.length, sourceId, allSources,
+    });
+    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, callees: edges };
   },
   cliHints: { name: 'code_callees', hidden: true },
 };
@@ -3751,7 +3827,10 @@ const code_def: Operation = {
       limit: (p.limit as number) ?? 20,
       language: (p.lang as string) || undefined,
     });
-    return { symbol: p.symbol as string, count: defs.length, defs };
+    // code_def is brain-wide (not source-scoped); readiness is 'symbol' grain.
+    const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: defs.length });
+    return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, defs };
   },
   cliHints: { name: 'code_def', hidden: true },
 };
@@ -3771,7 +3850,10 @@ const code_refs: Operation = {
       limit: (p.limit as number) ?? 50,
       language: (p.lang as string) || undefined,
     });
-    return { symbol: p.symbol as string, count: refs.length, refs };
+    // code_refs is brain-wide (not source-scoped); readiness is 'symbol' grain.
+    const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: refs.length });
+    return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, refs };
   },
   cliHints: { name: 'code_refs', hidden: true },
 };
@@ -4474,6 +4556,132 @@ const run_onboard: Operation = {
   },
 };
 
+// v0.41.20.0 SkillOpt — MCP exposure (admin scope + per-skill allowlist
+// via the resolver inside the handler). Designed for trusted admin tokens
+// that want to drive optimization remotely; the same trust gates as the
+// CLI fire (working tree, install path, lock acquisition, bundled-skill
+// guard). NOT localOnly so admin HTTP MCP clients can invoke.
+const run_skillopt: Operation = {
+  name: 'run_skillopt',
+  description: 'Run SkillOpt against a single skill. Admin scope; mutating; rate-limited per-skill via DB lock. See gbrain skillopt CLI for the full flag surface.',
+  params: {
+    skill_name: { type: 'string', required: true, description: 'Kebab-case skill name (resolves to skills/<name>/SKILL.md)' },
+    benchmark_path: { type: 'string', description: 'Absolute path to benchmark JSONL; defaults to skills/<name>/skillopt-benchmark.jsonl' },
+    epochs: { type: 'number', description: 'Default 4' },
+    batch_size: { type: 'number', description: 'Default 8' },
+    lr: { type: 'number', description: 'Default 4' },
+    max_cost_usd: { type: 'number', description: 'Default 5.00' },
+    no_mutate: { type: 'boolean', description: 'Write proposed.md without replacing SKILL.md' },
+    allow_mutate_bundled: { type: 'boolean', description: 'Required to mutate bundled skills' },
+    held_out_path: { type: 'string', description: 'Path to a held-out test set (JSONL). REQUIRED (>=5 rows) to mutate a bundled skill in place — otherwise the run hard-refuses. Remote callers: must resolve within the skills directory.' },
+    dry_run: { type: 'boolean', description: 'Cost preview, no LLM calls' },
+  },
+  mutating: true,
+  scope: 'admin',
+  localOnly: false,
+  handler: async (ctx, p) => {
+    // SECURITY: skill_name is joined into filesystem paths (SKILL.md, default
+    // benchmark, checkpoint, history, best.md, proposed.md). A traversal-shaped
+    // name (`../`, absolute) would escape the skills dir even WITH the
+    // caller-supplied-path confinement below. Validate kebab-only up front so
+    // every derived path is contained by construction. Applies to all callers.
+    const skillNameRaw = (p.skill_name as string) ?? '';
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(skillNameRaw)) {
+      throw new OperationError(`run_skillopt: skill_name must be kebab-case (matching ^[a-z0-9][a-z0-9-]*$); got '${skillNameRaw}'`, 'invalid_params');
+    }
+    if (ctx.remote !== false) {
+      // Remote: enforce per-skill allowlist read from config.
+      // `skillopt.allowed_skills` is a JSON-array config of skill names
+      // an admin-scoped OAuth client may target. Default DENY-ALL: when
+      // unset, MCP cannot drive skillopt on any skill.
+      const allowedRaw = await ctx.engine.getConfig('skillopt.allowed_skills');
+      let allowed: string[] = [];
+      try {
+        if (allowedRaw) allowed = JSON.parse(allowedRaw) as string[];
+      } catch { /* fall through to deny */ }
+      const skillName = (p.skill_name as string) ?? '';
+      if (!allowed.includes(skillName)) {
+        throw new OperationError(`run_skillopt: skill '${skillName}' is not in skillopt.allowed_skills allowlist (default deny-all for remote callers)`, 'permission_denied');
+      }
+    }
+    const { runSkillOpt } = await import('./skillopt/orchestrator.ts');
+    const { autoDetectSkillsDirReadOnly } = await import('./repo-root.ts');
+    const { resolveModel } = await import('./model-config.ts');
+    const detected = autoDetectSkillsDirReadOnly(process.cwd());
+    const skillsDir = detected.dir;
+    if (!skillsDir) {
+      throw new OperationError('run_skillopt: skills directory not found', 'config_error');
+    }
+    const optimizerModel = await resolveModel(ctx.engine, { tier: 'deep', fallback: 'anthropic:claude-opus-4-7' });
+    const targetModel = await resolveModel(ctx.engine, { tier: 'subagent', fallback: 'anthropic:claude-sonnet-4-6' });
+    const judgeModel = await resolveModel(ctx.engine, { tier: 'reasoning', fallback: 'anthropic:claude-sonnet-4-6' });
+    const skillName = p.skill_name as string;
+    const benchmarkPath = (p.benchmark_path as string) ??
+      `${skillsDir}/${skillName}/skillopt-benchmark.jsonl`;
+    const heldOutPath = p.held_out_path as string | undefined;
+    // SECURITY: remote callers must NOT be able to point benchmark/held-out at
+    // arbitrary host files (loadBenchmark → fs.readFileSync would otherwise be an
+    // arbitrary-read + existence oracle). Confine any caller-supplied path to the
+    // skills directory. Local CLI callers (ctx.remote === false) are unconfined.
+    if (ctx.remote !== false) {
+      const nodePath = await import('node:path');
+      const nodeFs = await import('node:fs');
+      const rootReal = (() => {
+        try { return nodeFs.realpathSync(skillsDir); } catch { return nodePath.resolve(skillsDir); }
+      })();
+      const confine = (label: string, candidate: string | undefined): void => {
+        if (!candidate) return;
+        const resolved = nodePath.resolve(candidate);
+        let real = resolved;
+        try {
+          real = nodeFs.realpathSync(resolved);
+        } catch {
+          // Not yet present: canonicalize the nearest existing ancestor so a
+          // legit in-dir path under a symlinked skillsDir (e.g. macOS /tmp ->
+          // /private/tmp, Conductor worktrees) isn't wrongly rejected.
+          try { real = nodePath.join(nodeFs.realpathSync(nodePath.dirname(resolved)), nodePath.basename(resolved)); }
+          catch { /* parent also missing; fall back to resolved form */ }
+        }
+        if (real !== rootReal && !real.startsWith(rootReal + nodePath.sep)) {
+          throw new OperationError(`run_skillopt: ${label} must resolve within the skills directory for remote callers`, 'permission_denied');
+        }
+      };
+      confine('benchmark_path', p.benchmark_path as string | undefined);
+      confine('held_out_path', heldOutPath);
+    }
+    const result = await runSkillOpt({
+      engine: ctx.engine,
+      skillName,
+      skillsDir,
+      benchmarkPath,
+      epochs: (p.epochs as number) ?? 4,
+      batchSize: (p.batch_size as number) ?? 8,
+      lr: (p.lr as number) ?? 4,
+      lrSchedule: 'cosine',
+      split: [4, 1, 5],
+      optimizerModel,
+      targetModel,
+      judgeModel,
+      mode: 'patch',
+      dryRun: (p.dry_run as boolean) === true,
+      noMutate: (p.no_mutate as boolean) === true,
+      allowMutateBundled: (p.allow_mutate_bundled as boolean) === true,
+      bootstrapReviewed: false,
+      ...(heldOutPath ? { heldOutPath } : {}),
+      json: true,
+      maxCostUsd: (p.max_cost_usd as number) ?? 5.0,
+      maxRuntimeMin: 30,
+      force: false,
+    });
+    return {
+      outcome: result.outcome,
+      receipt: result.receipt,
+      mutated_skill_file: result.mutatedSkillFile,
+      proposed_path: result.proposedPath,
+    };
+  },
+};
+
 export const operations: Operation[] = [
   // Page CRUD
   get_page, put_page, delete_page, list_pages,
@@ -4548,6 +4756,11 @@ export const operations: Operation[] = [
   schema_apply_mutations, reload_schema_pack,
   // v0.41.18.0 (T16, A7, codex #5)
   run_onboard,
+  // v0.41.20.0 SkillOpt — admin-scoped MCP op for remote optimization.
+  // Per-skill allowlist via `skillopt.allowed_skills` config (default
+  // deny-all for remote callers). NOT localOnly so admin OAuth clients
+  // can submit; CLI bypass via ctx.remote === false.
+  run_skillopt,
 ];
 
 export const operationsByName = Object.fromEntries(
