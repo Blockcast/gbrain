@@ -109,6 +109,46 @@ export function assertAllowedScopes(scopes: readonly string[]): void {
 }
 
 /**
+ * BLO-9319 defense-in-depth: the `admin` super-scope must never be granted to a
+ * `client_credentials` client. A client_credentials token is an unattended
+ * machine bearer (the paperclip agent fleet is exactly these — read/write
+ * client_credentials clients), so binding the all-implying `admin` scope to one
+ * is an unbounded escalation surface. Admin access is reserved for interactive
+ * (`authorization_code`) clients and the legacy `access_tokens` grandfather
+ * path, neither of which is a silent machine credential.
+ *
+ * Scoped deliberately narrow: only the exact `admin` token is blocked. The
+ * granular `sources_admin` / `users_admin` siblings (which do NOT imply other
+ * scopes — see IMPLIES) remain legal for client_credentials clients. A client
+ * with NO grant_types defaults to client_credentials (matching the storage
+ * default), so an empty list is treated as client_credentials here.
+ *
+ * Registration-time only; existing rows are not re-validated.
+ */
+export class ClientCredentialsAdminScopeError extends Error {
+  constructor() {
+    super(
+      "The 'admin' scope cannot be granted to a client_credentials client. " +
+        'Use an authorization_code client (or a legacy access token) for admin ' +
+        'access; client_credentials clients may hold read, write, sources_admin, ' +
+        'users_admin, or agent.',
+    );
+    this.name = 'ClientCredentialsAdminScopeError';
+  }
+}
+
+export function assertScopeAllowedForGrants(
+  scopes: readonly string[],
+  grantTypes: readonly string[],
+): void {
+  const isClientCredentials =
+    grantTypes.length === 0 || grantTypes.includes('client_credentials');
+  if (isClientCredentials && scopes.includes('admin')) {
+    throw new ClientCredentialsAdminScopeError();
+  }
+}
+
+/**
  * Parse a space-separated scope string (OAuth wire format) into an array,
  * dropping empty fragments. Does NOT validate against ALLOWED_SCOPES — call
  * assertAllowedScopes afterward at registration time.

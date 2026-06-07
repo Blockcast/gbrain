@@ -521,7 +521,7 @@ Usage:
      --grant-types <client_credentials,authorization_code>  (default: client_credentials;
                                                             auto-set to authorization_code,refresh_token
                                                             when --redirect-uri is passed)
-     --scopes "<read write admin>"                         (default: read)
+     --scopes "<read write sources_admin users_admin>"     (default: read; admin scope only via --grant-types authorization_code)
      --source <id>                                         (default: default)
      --federated-read <id1,id2,...>                        (default: [source])
      --redirect-uri <https://...>                          (v0.41.3+; repeatable; required for authorization_code)
