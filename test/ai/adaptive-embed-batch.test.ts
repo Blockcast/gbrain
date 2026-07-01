@@ -35,10 +35,12 @@ import {
   embed,
   splitByTokenBudget,
   isTokenLimitError,
+  shouldWarnMissingBatchTokens,
   __setEmbedTransportForTests,
   __getShrinkStateForTests,
 } from '../../src/core/ai/gateway.ts';
 import { AIConfigError, AITransientError } from '../../src/core/ai/errors.ts';
+import type { EmbeddingTouchpoint, Recipe } from '../../src/core/ai/types.ts';
 
 // --------- Test helpers ---------
 
@@ -412,5 +414,28 @@ describe('startup warning for recipes missing max_batch_tokens', () => {
     expect(warnings.find(w => w.includes('"google"'))).toBeUndefined();
     expect(warnings.find(w => w.includes('"voyage"'))).toBeUndefined();
     expect(warnings.find(w => w.includes('"openai"'))).toBeUndefined();
+  });
+
+  test('the guardrail still detects a recipe that forgets the cap (synthetic fixture)', () => {
+    // The invariant above proves no SHIPPED recipe warns. This proves the
+    // mechanism that WOULD warn is still armed for a future recipe that
+    // inherits the embedding touchpoint but forgets max_batch_tokens — the
+    // "warns once" coverage that used to live on the (now-capped) google
+    // recipe, now decoupled from any real recipe being left uncapped.
+    const base: EmbeddingTouchpoint = { models: ['synthetic-embed-001'], default_dims: 768 };
+    const mk = (id: string, embedding: EmbeddingTouchpoint | undefined): Recipe => ({
+      id,
+      name: `synthetic ${id}`,
+      tier: 'openai-compat',
+      implementation: 'openai-compatible',
+      touchpoints: { embedding },
+    });
+    // Forgets the cap → the guardrail fires.
+    expect(shouldWarnMissingBatchTokens(mk('acme-embed', { ...base }))).toBe(true);
+    // Suppression paths stay silent.
+    expect(shouldWarnMissingBatchTokens(mk('acme-embed', { ...base, max_batch_tokens: 4096 }))).toBe(false);
+    expect(shouldWarnMissingBatchTokens(mk('acme-embed', { ...base, no_batch_cap: true }))).toBe(false);
+    expect(shouldWarnMissingBatchTokens(mk('openai', { ...base }))).toBe(false);
+    expect(shouldWarnMissingBatchTokens(mk('chat-only', undefined))).toBe(false);
   });
 });
