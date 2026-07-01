@@ -2037,6 +2037,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Chunks
   async upsertChunks(slug: string, chunks: ChunkInput[], opts?: { sourceId?: string } & BatchOpts): Promise<void> {
+    slug = validateSlug(slug);
     return this.batchRetry(opts?.auditSite ?? 'upsertChunks', opts?.signal, () => this._upsertChunksOnce(slug, chunks, opts), chunks.length);
   }
 
@@ -2166,6 +2167,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getChunks(slug: string, opts?: { sourceId?: string }): Promise<Chunk[]> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     const { rows } = await this.db.query(
       `SELECT cc.* FROM content_chunks cc
@@ -3241,6 +3243,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Tags
   async addTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Pre-check source-scoped page existence; ON CONFLICT only handles the
     // already-tagged case, not missing pages.
@@ -3258,6 +3261,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async removeTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     // Source-qualify the page-id subquery; slugs are only unique per source.
     await this.db.query(
@@ -4601,6 +4605,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Versions
   async createVersion(slug: string, opts?: { sourceId?: string }): Promise<PageVersion> {
+    slug = validateSlug(slug);
     const sourceId = opts?.sourceId ?? 'default';
     const { rows } = await this.db.query(
       `INSERT INTO page_versions (page_id, compiled_truth, frontmatter)
@@ -4614,6 +4619,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getVersions(slug: string, opts?: { sourceId?: string }): Promise<PageVersion[]> {
+    slug = validateSlug(slug);
     // v0.31.8 (D16): two-branch. Without opts.sourceId, joins return versions
     // for every same-slug page (preserves pre-v0.31.8 cross-source view).
     if (opts?.sourceId) {
