@@ -509,6 +509,33 @@ const _warnedRecipes = new Set<string>();
  * The warning calls that out before production traffic hits it, while avoiding
  * unrelated startup noise from recipes the current brain is not using.
  */
+/**
+ * Pure predicate: would this recipe trip the missing-max_batch_tokens startup
+ * warning? A recipe warns when it declares an embedding touchpoint that
+ * (a) has no `max_batch_tokens`, (b) is not the OpenAI canonical fast-path
+ * recipe, and (c) has not explicitly opted out via `no_batch_cap: true`.
+ *
+ * Exported for testability. As of the google/gemini cap, every SHIPPED recipe
+ * is either capped or opts out, so the warning has no live fixture left in the
+ * registry. Tests exercise the guardrail through this predicate with a
+ * synthetic capless recipe — the mechanism that catches a FUTURE recipe which
+ * inherits the embedding touchpoint but forgets the cap stays covered without
+ * depending on any real recipe being left uncapped.
+ */
+export function shouldWarnMissingBatchTokens(recipe: Recipe): boolean {
+  const embedding = recipe.touchpoints?.embedding;
+  if (!embedding || embedding.max_batch_tokens !== undefined) return false;
+  // OpenAI is the canonical "no cap declared, fast path is intentional"
+  // recipe; suppress the warning for it. Every other recipe missing the
+  // field is suspicious.
+  if (recipe.id === 'openai') return false;
+  // v0.32 (#779): explicit opt-out for dynamic-cap recipes (Ollama,
+  // LiteLLM proxy, llama-server) — they ship without a static cap because
+  // the cap depends on a user-launched server. Warning is noise for them.
+  if (embedding.no_batch_cap === true) return false;
+  return true;
+}
+
 function warnRecipesMissingBatchTokens(): void {
   const configuredProviderIds = new Set<string>();
   for (const model of [_config?.embedding_model, _config?.embedding_multimodal_model]) {
@@ -519,16 +546,7 @@ function warnRecipesMissingBatchTokens(): void {
 
   for (const recipe of listRecipes()) {
     if (!configuredProviderIds.has(recipe.id)) continue;
-    const embedding = recipe.touchpoints?.embedding;
-    if (!embedding || embedding.max_batch_tokens !== undefined) continue;
-    // OpenAI is the canonical "no cap declared, fast path is intentional"
-    // recipe; suppress the warning for it. Every other recipe missing the
-    // field is suspicious.
-    if (recipe.id === 'openai') continue;
-    // v0.32 (#779): explicit opt-out for dynamic-cap recipes (Ollama,
-    // LiteLLM proxy, llama-server) — they ship without a static cap because
-    // the cap depends on a user-launched server. Warning is noise for them.
-    if (embedding.no_batch_cap === true) continue;
+    if (!shouldWarnMissingBatchTokens(recipe)) continue;
     if (_warnedRecipes.has(recipe.id)) continue;
     _warnedRecipes.add(recipe.id);
     // eslint-disable-next-line no-console
