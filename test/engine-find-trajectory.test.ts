@@ -15,6 +15,7 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import {
   detectRegressions,
   computeDriftScore,
@@ -26,6 +27,21 @@ import type { TrajectoryPoint } from '../src/core/engine.ts';
 let engine: PGLiteEngine;
 
 beforeAll(async () => {
+  // v0.41.5.0+: DEFAULT_EMBEDDING_DIMENSIONS is 1280 (ZE Matryoshka), but
+  // vecForMetric() below inserts 1536-dim vectors into facts.embedding.
+  // initSchema() sizes the embedding column from the gateway's configured
+  // dimensions; without pinning, a fresh CI environment (no prior gateway
+  // configure) sizes the column at vector(1280) and the inserts throw
+  // "expected 1280 dimensions, not 1536". Pin 1536 here so the column and the
+  // fixtures agree regardless of shard ordering. Mirrors the sibling
+  // operations-find-trajectory.test.ts (this engine-layer test was missed
+  // when that dimension-flip fix landed).
+  resetGateway();
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: { OPENAI_API_KEY: 'sk-fake' },
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
