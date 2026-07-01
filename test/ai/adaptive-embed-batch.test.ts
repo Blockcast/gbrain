@@ -383,34 +383,34 @@ describe('shrink-on-miss adaptive cache', () => {
 describe('startup warning for recipes missing max_batch_tokens', () => {
   beforeEach(() => resetGateway());
 
-  test('configured missing-cap recipe warns once; unrelated recipes stay quiet', () => {
+  test('every shipped embedding recipe declares a batch cap or opts out (no startup warnings)', () => {
     const warnings: string[] = [];
     const original = console.warn;
     console.warn = (msg: string) => warnings.push(String(msg));
     try {
+      // Configuring the gateway walks the whole recipe registry once. As of
+      // the google max_batch_tokens fix, EVERY built-in embedding recipe
+      // either declares max_batch_tokens (voyage, openai, google, …) or sets
+      // no_batch_cap: true (litellm-proxy, llama-server, ollama), so the
+      // missing-cap guardrail must stay silent. Reconfiguring must not
+      // resurrect a warning either.
       configureOpenAI();
-      expect(warnings.length).toBe(0);
       configureGoogle();
-      const firstCallCount = warnings.length;
-      // Reconfigure: the warning should NOT re-fire for the same recipes
-      // within one process (we already told the operator).
       configureGoogle();
-      expect(warnings.length).toBe(firstCallCount);
     } finally {
       console.warn = original;
     }
 
-    // The warning text should match the documented contract.
+    // No recipe should trip the missing-max_batch_tokens contract warning.
     const contractMatch = warnings.filter(w =>
       w.includes('[ai.gateway]') && w.includes('declares an embedding touchpoint'),
     );
-    expect(contractMatch.length).toBe(1);
+    expect(contractMatch.length).toBe(0);
 
-    // Voyage declares max_batch_tokens → suppressed. OpenAI is the
-    // canonical fast-path recipe → also suppressed by id. Both must be
-    // absent from the warnings.
+    // google previously warned (it was the sole capless recipe); it now
+    // declares max_batch_tokens, so it must be suppressed like the rest.
+    expect(warnings.find(w => w.includes('"google"'))).toBeUndefined();
     expect(warnings.find(w => w.includes('"voyage"'))).toBeUndefined();
     expect(warnings.find(w => w.includes('"openai"'))).toBeUndefined();
-    expect(warnings.find(w => w.includes('"google"'))).toBeDefined();
   });
 });

@@ -16,6 +16,19 @@ export const google: Recipe = {
       dims_options: [768, 1536, 3072],
       cost_per_1m_tokens_usd: 0.15,
       price_last_verified: '2026-04-20',
+      // gemini-embedding-001 caps each input at 2048 tokens and — unlike most
+      // providers — effectively accepts only ONE text per request (the
+      // batchEmbedContents batch size is 1; excess tokens error when
+      // AUTO_TRUNCATE=false). gbrain batches by token budget, not item count,
+      // so this can't enforce the 1-item rule outright, but a conservative
+      // 2048-token cap (1 char ≈ 1 token dense content, 0.5 utilization —
+      // same assumption as the voyage recipe) keeps any single request under
+      // the per-text limit and arms the gateway's recursive-halving safety
+      // net. Sources: https://ai.google.dev/api/embeddings ;
+      // langchain-ai/langchainjs#8490 (single-input batch limit).
+      max_batch_tokens: 2_048,
+      chars_per_token: 1,
+      safety_factor: 0.5,
     },
     expansion: {
       models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite'],
