@@ -58,6 +58,26 @@ describe('isRetryableConnError', () => {
     expect(isRetryableConnError(new Error('ECONNRESET'))).toBe(true);
   });
 
+  // BLO-21615 regression. ECONNREFUSED is a DIFFERENT failure from ECONNRESET
+  // (refused connect(2) vs. reset of an established socket) and is not matched
+  // by /connection refused/i, so it needs its own pattern and its own guard.
+  test('matches ECONNREFUSED', () => {
+    expect(isRetryableConnError(new Error('connect ECONNREFUSED 10.0.0.1:5432'))).toBe(true);
+  });
+
+  test('matches the exact GBrainError text that crash-looped gbrain-mcp/admin-ui', () => {
+    // Byte-for-byte the message GBrainError composes as
+    // `${problem}: ${cause_description}. Fix: ${fix}` from db.ts connect(),
+    // and byte-for-byte the single line `kubectl logs --previous` showed for
+    // each of the 125 exit-1 restarts. If this stops matching, the container
+    // goes back to dying on any Postgres endpoint gap.
+    const err = new Error(
+      'Cannot connect to database: connect ECONNREFUSED 10.99.216.174:5432. ' +
+      'Fix: Check your connection URL in ~/.gbrain/config.json',
+    );
+    expect(isRetryableConnError(err)).toBe(true);
+  });
+
   test('matches database-starting-up', () => {
     expect(
       isRetryableConnError(new Error('the database system is starting up'))

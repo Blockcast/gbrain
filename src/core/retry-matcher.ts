@@ -17,6 +17,14 @@ const CONN_PATTERNS = [
   /the database system is starting up/i,
   /Connection terminated unexpectedly/i,
   /ECONNRESET/i,
+  // BLO-21615: the kernel's connect(2) refusal, as surfaced by Node/Bun —
+  // "connect ECONNREFUSED <ip>:<port>". Distinct from ECONNRESET (peer reset
+  // an ESTABLISHED socket) and NOT matched by /connection refused/i above,
+  // which only catches Postgres's own prose form. On Kubernetes this is what
+  // kube-proxy REJECTs with while a Service has zero ready endpoints — i.e.
+  // for the whole of any DB pod restart — so it is the single most common
+  // transient connect failure in-cluster, and it was the one pattern missing.
+  /ECONNREFUSED/i,
   /connection.*closed/i,
   /server closed the connection/i,
   /could not connect to server/i,

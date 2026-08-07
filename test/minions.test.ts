@@ -2177,6 +2177,35 @@ describe('connectWithRetry / isRetryableDbConnectError', () => {
     expect(isRetryableDbConnectError(new Error('something happened: ECONNRESET'))).toBe(true);
   });
 
+  // BLO-21615: db.ts kept its own inline pattern list that lacked ECONNREFUSED,
+  // so connectWithRetry rethrew on attempt 1 and `serve --http` exited 1 every
+  // time it started during a DB-pod restart. Now delegates to retry-matcher.
+  test('isRetryableDbConnectError matches ECONNREFUSED (BLO-21615)', async () => {
+    const { isRetryableDbConnectError } = await import('../src/core/db.ts');
+    expect(isRetryableDbConnectError(new Error('connect ECONNREFUSED 10.99.216.174:5432'))).toBe(true);
+  });
+
+  test('connectWithRetry survives an ECONNREFUSED window (BLO-21615)', async () => {
+    const { connectWithRetry } = await import('../src/core/db.ts');
+    let attempts = 0;
+    const fakeEngine = {
+      connect: async () => {
+        attempts++;
+        // Two refusals — a DB pod restart leaving the Service with zero ready
+        // endpoints — then the endpoint comes back.
+        if (attempts <= 2) {
+          throw new Error(
+            'Cannot connect to database: connect ECONNREFUSED 10.99.216.174:5432. ' +
+            'Fix: Check your connection URL in ~/.gbrain/config.json',
+          );
+        }
+      },
+    } as unknown as Parameters<typeof connectWithRetry>[0];
+
+    await connectWithRetry(fakeEngine, { database_url: 'postgres://x' }, { baseDelayMs: 1, log: () => {} });
+    expect(attempts).toBe(3);
+  });
+
   test('isRetryableDbConnectError rejects permanent errors', async () => {
     const { isRetryableDbConnectError } = await import('../src/core/db.ts');
     expect(isRetryableDbConnectError(new Error('extension "vector" does not exist'))).toBe(false);
