@@ -322,19 +322,19 @@ export async function withTransaction<T>(fn: (tx: ReturnType<typeof postgres>) =
   }) as Promise<T>;
 }
 
-const RETRYABLE_DB_CONNECT_PATTERNS = [
-  /password authentication failed/i,
-  /connection refused/i,
-  /the database system is starting up/i,
-  /Connection terminated unexpectedly/i,
-  /ECONNRESET/i,
-];
-
-export function isRetryableDbConnectError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (!msg) return false;
-  return RETRYABLE_DB_CONNECT_PATTERNS.some(p => p.test(msg));
-}
+// BLO-21615: this predicate used to carry its own inline 5-pattern list — the
+// exact drift `retry-matcher.ts` was created to end ("Before this module these
+// predicates lived inline at each site and drifted over time"). db.ts was never
+// migrated, so it silently stayed a subset: it lacked ECONNREFUSED, the 08xxx
+// SQLSTATE class, CONNECTION_ENDED and 53300. Consequence in production: a
+// `serve --http` starting during a DB-pod restart got `connect ECONNREFUSED
+// <clusterIP>:5432`, connectWithRetry classified it NON-retryable, rethrew on
+// attempt 1, and the container exited 1 — 125 restarts over 17 days on
+// gbrain-mcp/admin-ui. The retry+backoff was always wired; only the
+// classification was wrong. Delegate so there is one list, not two.
+// Imported (not just re-exported) so connectWithRetry below binds it locally.
+import { isRetryableConnError as isRetryableDbConnectError } from './retry-matcher.ts';
+export { isRetryableDbConnectError };
 
 export interface ConnectWithRetryOpts {
   attempts?: number;

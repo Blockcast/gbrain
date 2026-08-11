@@ -2,6 +2,18 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.51.1] - 2026-08-07
+
+**A server starting up while Postgres is briefly unreachable now waits for it instead of dying.** `gbrain serve` has had connect retry with exponential backoff since v0.21 — but it never fired for the single most common transient failure in a container environment, because that error was classified as permanent.
+
+`connect ECONNREFUSED <host>:<port>` is what the kernel returns when nothing is accepting on the port, and on Kubernetes it is what kube-proxy returns for the entire duration of any database pod restart. It is a different string from Postgres's own `connection refused` prose, and it was not in the retry list — so `connectWithRetry` rethrew on the first attempt and the process exited 1. Observed in production as 125 restarts over 17 days of a `gbrain serve --http` container, each one a four-second life ending in `Cannot connect to database: connect ECONNREFUSED …`.
+
+The retry machinery was always correct and always wired in; only the classification was wrong.
+
+### Fixed
+- **`ECONNREFUSED` is treated as a transient connect error.** A server starting during a database restart, failover, or endpoint gap now retries with backoff and comes up, instead of exiting 1 and relying on a supervisor to restart it. Genuinely permanent failures (missing extension, missing relation, syntax error) are still not retried.
+- **`db.ts` no longer keeps a second, drifted copy of the retry-pattern list.** `isRetryableDbConnectError` delegates to `retry-matcher.ts`, the module introduced precisely to stop this drift. The private copy had fallen five patterns behind — it was missing `ECONNREFUSED`, the `08xxx` SQLSTATE class, `CONNECTION_ENDED`, and `53300` — so connect-time retry silently recovered from strictly fewer conditions than every other retry site in the codebase.
+
 ## [0.42.51.0] - 2026-06-17
 
 **`gbrain sync` stops bottlenecking all its workers on a single database row, a malformed checkpoint can no longer wedge a source, and `gbrain doctor` tells an actively-running sync apart from a stuck one.** A slow source that fell behind HEAD could read as permanently stale even while it imported every cycle: sync was single-core-bound at the database layer, so handing it more workers didn't help, and the freshness check couldn't see that a sync was in fact running.
