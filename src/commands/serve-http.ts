@@ -747,12 +747,31 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   app.use(authRouter);
 
   // ---------------------------------------------------------------------------
-  // Health check — liveness only. Full engine stats live at
-  // /admin/api/full-stats (requireAdmin). See probeLiveness above for the why.
+  // Health check — READINESS semantics: 503 while the database is unreachable,
+  // which is what should pull this pod out of the Service endpoints.
+  // Full engine stats live at /admin/api/full-stats (requireAdmin).
   // ---------------------------------------------------------------------------
   app.get('/health', async (_req, res) => {
     const result = await probeLiveness(sql, config.engine || 'pglite', VERSION);
     res.status(result.status).json(result.body);
+  });
+
+  // ---------------------------------------------------------------------------
+  // BLO-21615: LIVENESS, and deliberately not database-dependent.
+  //
+  // /health was wired to BOTH probes in paperclip/gbrain-mcp.yaml, so a
+  // Postgres blip made it 503 and the kubelet SIGKILLed admin-ui ~180s later
+  // (exitCode 137 at a 209s container lifetime, measured 2026-08-22). That is a
+  // category error: restarting this container cannot fix Postgres, and it tears
+  // down every in-flight MCP request across the fleet to achieve nothing.
+  //
+  // Liveness asks "is this process wedged?". Serving this response at all
+  // proves the event loop turns and the HTTP server accepts — which is the
+  // whole question. Dependency health belongs to readiness, above.
+  // ponytail: no event-loop-lag check; add one if a wedge ever survives this.
+  // ---------------------------------------------------------------------------
+  app.get('/livez', (_req, res) => {
+    res.status(200).json({ status: 'ok', version: VERSION });
   });
 
   // ---------------------------------------------------------------------------
