@@ -67,6 +67,31 @@ export async function fetchLatestRelease(): Promise<{ tag: string; published_at:
   }
 }
 
+/**
+ * Cap on the changelog slice carried in a `check-update` payload.
+ *
+ * `extractChangelogBetween` returns EVERY entry between the installed version
+ * and the latest release, so it grows without bound as upstream ships: an
+ * install 8 minors behind produced a 529 KB `--json` payload. That is both
+ * useless as "what's new" and actively harmful — `console.log` of a payload
+ * that large is delivered asynchronously on a pipe, and the CLI's exit path
+ * force-exits before the tail drains (the #1959/#2084 truncation class, which
+ * has no delivery signal in Bun to wait on). The result is VALID-LOOKING but
+ * truncated JSON with exit code 0 — `gbrain check-update --json | jq` fails on
+ * an unterminated string, and no error is reported anywhere (BLO-33491).
+ *
+ * 16 KB keeps the whole payload inside a single 64 KiB pipe buffer with room
+ * to spare, so the output is delivered whole. Anyone wanting the full history
+ * has `release_url` in the same payload.
+ */
+export const CHANGELOG_DIFF_MAX_CHARS = 16_000;
+
+/** Bound a changelog slice, marking the cut so a reader knows it was clipped. */
+export function capChangelogDiff(diff: string, max = CHANGELOG_DIFF_MAX_CHARS): string {
+  if (diff.length <= max) return diff;
+  return `${diff.slice(0, max).trimEnd()}\n\n… changelog truncated (${diff.length} chars); see release_url for the full history.`;
+}
+
 export async function fetchChangelog(currentVersion: string, latestVersion: string): Promise<string> {
   try {
     const res = await fetch('https://raw.githubusercontent.com/garrytan/gbrain/master/CHANGELOG.md', {
@@ -74,7 +99,7 @@ export async function fetchChangelog(currentVersion: string, latestVersion: stri
     });
     if (!res.ok) return '';
     const text = await res.text();
-    return extractChangelogBetween(text, currentVersion, latestVersion);
+    return capChangelogDiff(extractChangelogBetween(text, currentVersion, latestVersion));
   } catch {
     return '';
   }

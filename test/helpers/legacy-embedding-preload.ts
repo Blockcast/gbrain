@@ -41,25 +41,32 @@ if (process.env.GBRAIN_DEBUG_PRELOAD === '1') {
 // Initial application — covers tests that don't reset the gateway.
 applyLegacy();
 
-// Per-test re-application — handles tests that call `resetGateway()`
-// in their setup/teardown. Bun's preload allows registering global
-// hooks; this fires before every test in every file in the shard.
-//
-// Tests that need a different gateway config (the new v0.37 tests,
-// future ZE-1280 tests) call `configureGateway()` in their own
-// beforeAll AFTER this beforeEach runs. Order is:
-//   1. legacy preload beforeEach → applyLegacy (1536)
-//   2. file-local beforeAll → may overwrite to ZE/1280
-// Since beforeAll runs once per file BEFORE the first beforeEach,
-// file-local beforeAll wins for that file's tests. ✓
-beforeEach(() => {
+// Only re-apply when the gateway slot is EMPTY. Tests that explicitly
+// configured a different model in their own beforeAll get to keep it.
+function applyLegacyIfUnset() {
   try {
-    // Only re-apply if the gateway was reset (or never configured).
-    // Tests that explicitly configured a different model in their
-    // own beforeAll get to keep it — we only restore the legacy
-    // default when the slot is empty.
     getEmbeddingDimensions();
   } catch {
     applyLegacy();
   }
-});
+}
+
+// Per-test re-application — handles tests that call `resetGateway()`
+// in their setup/teardown. Bun's preload allows registering global
+// hooks; this fires before every test in every file in the shard.
+//
+// ⚠ THIS DOES NOT COVER A FILE'S OWN `beforeAll` (BLO-33491). Bun runs a
+// file's root `beforeAll` BEFORE the first `beforeEach`, and a preload
+// `beforeAll` registers once for the run, not once per file. So a file whose
+// `afterAll` calls `resetGateway()` leaves the slot EMPTY for the NEXT file's
+// `beforeAll`, where `initSchema()` silently falls back to the production
+// default (ZE/1280) and sizes `facts.embedding` at 1280 — then this hook
+// restores 1536 and the file's hardcoded 1536-d fixtures fail
+// CheckExpectedDim ("expected 1280 dimensions, not 1536").
+//
+// A test that BUILDS A SCHEMA in its own `beforeAll` and uses 1536-d fixtures
+// must therefore call `configureGateway()` itself before `initSchema()`
+// rather than relying on this preload. `test/facts-engine.test.ts` is the
+// worked example. The failure is order-dependent, so re-sharding moves it
+// between files instead of surfacing it.
+beforeEach(applyLegacyIfUnset);

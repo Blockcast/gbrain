@@ -218,6 +218,14 @@ describe('progress reporter', () => {
   test('only one process-level signal handler installed across many reporters', () => {
     // Baseline: one handler already installed by prior tests in this file.
     const installedBefore = __signalHandlerInstalledForTest();
+    // `liveReporters` is a MODULE-level Set, so it is shared with every other
+    // test file in this shard's bun process. A reporter another file created
+    // and never finish()ed sits in it, so an absolute `toBe(0)` here asserts
+    // "nobody in the whole shard leaked", not "these 50 lifecycles leaked
+    // nothing" — which made the test pass or fail on shard tenancy alone
+    // (BLO-33491). The contract this pins is the DELTA; baseline it, same as
+    // the signal handler above.
+    const liveBefore = __liveReporterCountForTest();
     const { stream } = sink(false);
     for (let i = 0; i < 50; i++) {
       const p = createProgress({ mode: 'json', stream, minIntervalMs: 0, minItems: 1 });
@@ -226,7 +234,7 @@ describe('progress reporter', () => {
     }
     // After 50 reporter lifecycles, still exactly one handler and zero leaked live entries.
     expect(__signalHandlerInstalledForTest()).toBe(installedBefore || true);
-    expect(__liveReporterCountForTest()).toBe(0);
+    expect(__liveReporterCountForTest()).toBe(liveBefore);
   });
 
   test('startHeartbeat() fires heartbeats and stop() clears', async () => {
