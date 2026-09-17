@@ -2,6 +2,21 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.51.2] - 2026-09-17
+
+**A server starting up during a Postgres restart now actually outlasts it, liveness no longer kills a healthy process because the database is down, and a container that does give up says why.** v0.42.51.1 fixed the *classification* of `ECONNREFUSED` so connect retry would fire at all; this fixes the two things that still made it insufficient in production — the budget was far too short, and the probe wiring restarted the wrong thing.
+
+`connectWithRetry`'s budget was three *attempts* (1s + 2s ≈ 3s of patience). A Postgres pod restart takes tens of seconds, so `serve --http` still exited 1 about seven seconds in and gbrain-mcp/admin-ui kept crash-looping — 26 restarts in the 105 minutes of the 2026-09-06 window, costing 92 fleet recall failures. An attempt count cannot express "outlast a restart"; wall-clock can.
+
+Separately, `/health` was wired to **both** the liveness and readiness probes, so a database blip made it 503 and the kubelet SIGKILLed the container ~180s later (exitCode 137 at a 209s lifetime, measured 2026-08-22). Restarting this container cannot fix Postgres, and it tears down every in-flight MCP request across the fleet to achieve nothing.
+
+### Added
+- **`/livez` — liveness, deliberately not database-dependent.** Liveness asks "is this process wedged?"; serving the response at all proves the event loop turns and the HTTP server accepts. Dependency health belongs to readiness, which is what `/health` now is (503 while the database is unreachable, pulling the pod out of Service endpoints rather than killing it).
+- **Terminal connect failures are recorded to `/dev/termination-log`.** The crashing container's logs are not retained, so every post-mortem so far had a restart count and no cause. Kubernetes surfaces this file as `lastState.terminated.message` for the *previous* container — the one durable channel available. Best-effort: it never masks the real error.
+
+### Changed
+- **The connect retry budget is wall-clock, not attempt-count.** Default 30s keeps interactive CLI commands snappy; the long-lived server raises it via `GBRAIN_CONNECT_TIMEOUT_MS`. Backoff is capped by `maxDelayMs` so a long budget does not degenerate into one enormous sleep, and the deadline is checked against the sleep about to be taken, so the budget is never overshot.
+
 ## [0.42.51.1] - 2026-08-07
 
 **A server starting up while Postgres is briefly unreachable now waits for it instead of dying.** `gbrain serve` has had connect retry with exponential backoff since v0.21 — but it never fired for the single most common transient failure in a container environment, because that error was classified as permanent.
