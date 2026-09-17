@@ -13,10 +13,25 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { configureGateway } from '../src/core/ai/gateway.ts';
 
 let engine: PGLiteEngine;
 
 beforeAll(async () => {
+  // Pin the gateway BEFORE initSchema(): `vec()` below emits 1536-d fixtures,
+  // so `facts.embedding` must be sized 1536 too. The legacy-embedding preload
+  // cannot guarantee this — it restores 1536 from a `beforeEach`, which runs
+  // AFTER this `beforeAll`. A preceding file whose `afterAll` calls
+  // `resetGateway()` therefore leaves the slot empty here, initSchema() falls
+  // back to the production default (ZE/1280), and every 1536-d insert dies on
+  // `CheckExpectedDim: expected 1280 dimensions, not 1536`. That made the
+  // failure depend on shard tenancy, so adding any test file moved it between
+  // shards (BLO-33491). Configuring it here makes the file order-independent.
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: { ...process.env },
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
