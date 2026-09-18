@@ -13,7 +13,13 @@ import { hardenBrainRepo } from '../src/core/brain-repo-durability.ts';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-C', cwd, '-c', 'protocol.file.allow=always', ...args], {
-    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8',
+    // The env option is NOT optional here. bun (<=1.3.13, the CI pin) snapshots
+    // the environment at process start and does NOT propagate later
+    // process.env mutations to execFileSync children when it is omitted.
+    // beforeEach sets HOME/GBRAIN_HOME at runtime, so without this the
+    // post-commit hook appends to the REAL ~/.gbrain/brain-push.log and the
+    // temp log this file asserts on never grows.
+    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', env: process.env,
   }).trim();
 }
 function originHead(bare: string): string {
@@ -141,12 +147,10 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
     writeFileSync(join(work, 'orphan.md'), 'o\n');
     git(work, 'add', 'orphan.md'); git(work, 'commit', '-qm', 'orphan');
     const log = join(process.env.GBRAIN_HOME!, 'brain-push.log');
-    // The hook has to fail a push AND a rebase-pull against an unreachable remote
-    // before it logs. Measured at ~9s on a CI runner, so 8s was never enough — it
-    // only ever passed because beforeEach's own hook, losing its remote to the
-    // set-url above mid-flight, wrote this line in ~150ms. Deadline on an
-    // observable condition, not a sleep; the file's own budget in CI is 60s.
-    const deadline = Date.now() + 30000;
+    // Before the beforeEach drain this only ever passed by accident: the
+    // scaffolding hook, losing its remote to the set-url above mid-flight,
+    // wrote this line itself. Now it is this commit's own hook that must.
+    const deadline = Date.now() + 8000;
     let found = false;
     while (Date.now() < deadline) {
       if (existsSync(log) && readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) { found = true; break; }
