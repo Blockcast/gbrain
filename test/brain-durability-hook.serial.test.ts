@@ -28,6 +28,32 @@ async function waitForOrigin(bare: string, expectSha: string, ms = 8000): Promis
   return false;
 }
 
+// Terminal lines of the hook's brain_push — one is appended on every exit path,
+// after all of its git subprocesses have exited.
+const HOOK_SETTLED = /\[push\] (ok|ok-after-rebase|LOCAL-ONLY|lock-timeout|detached)/;
+/**
+ * Barrier on the background post-commit push having FINISHED.
+ *
+ * `waitForOrigin` returns as soon as the ref lands on the remote, which is not the
+ * same event: the hook can still be inside `git pull --rebase` holding
+ * `.git/index.lock`, and the next `git add` then dies with
+ * "Unable to create '.git/index.lock': File exists".
+ *
+ * hardenBrainRepo() commits the scaffolding (firing the hook -> background push)
+ * AND pushes synchronously itself. The two race; the background one loses, rebases,
+ * and takes index.lock a few ms after hardenBrainRepo has already returned — so
+ * beforeEach must drain it before any test touches the index.
+ */
+async function waitForHookSettled(ms = 8000): Promise<boolean> {
+  const log = join(process.env.GBRAIN_HOME!, 'brain-push.log');
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (existsSync(log) && HOOK_SETTLED.test(readFileSync(log, 'utf-8'))) return true;
+    await new Promise(r => setTimeout(r, 25));
+  }
+  return false;
+}
+
 let root: string, work: string, bare: string;
 let oldHome: string | undefined, oldGbrainHome: string | undefined;
 
@@ -46,6 +72,9 @@ beforeEach(async () => {
   git(work, 'add', 'README.md'); git(work, 'commit', '-qm', 'init'); git(work, 'push', '-q', 'origin', 'main');
   git(work, 'remote', 'set-head', 'origin', 'main');
   await hardenBrainRepo({ repoPath: work, sourceId: 'wiki', pat: 'ghp_x', installCron: false });
+  // Drain the background push the scaffolding commit just spawned, or it races the
+  // first `git add` of whichever test runs next.
+  await waitForHookSettled();
 });
 afterEach(() => {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
