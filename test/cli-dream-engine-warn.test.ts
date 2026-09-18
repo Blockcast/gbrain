@@ -55,6 +55,14 @@ describe('#1422 — dream surfaces connectEngine failures', () => {
       }));
       const { stderr, status } = runDream(['--dir', tmpBrain, '--phase', 'lint'], {
         GBRAIN_HOME: tmpHome,
+        // BLO-21615: pin the connect budget instead of inheriting the 30s
+        // default, which is this spawn's own timeout — so the retry loop would
+        // race the timeout and the WARNING would never print. This passed
+        // before only because the pre-clamp give-up quit at ~half the budget
+        // (~15s); now that 30s genuinely means 30s the dependency is visible.
+        // This test asserts the WARNING text, not the budget, so 500ms is the
+        // honest value: one failed attempt, one clamped sleep, then give up.
+        GBRAIN_CONNECT_TIMEOUT_MS: '500',
       });
       // Filesystem-only phases still run; exit code reflects cycle outcome,
       // not connect failure. The KEY contract: the WARNING text appears.
