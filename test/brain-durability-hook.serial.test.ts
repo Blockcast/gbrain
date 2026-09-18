@@ -53,6 +53,23 @@ async function waitForHookSettled(ms = 8000): Promise<boolean> {
   }
   return false;
 }
+/**
+ * Second half of the barrier. brain_push holds an flock on $GIT_DIR/gbrain-push.lock
+ * for its whole body, so the terminal log line is written INSIDE the critical section
+ * — the lock outlives it by however long the detached subshell takes to exit.
+ *
+ * That matters because the hook serialises ALL pushes in the repo: hand the next
+ * commit's hook a still-held lock and it blocks in `flock -w 30` having written
+ * nothing at all, so a test waiting on its own hook's log line sees pure silence.
+ * Acquiring the lock ourselves is the "previous hook has fully exited" condition.
+ */
+function waitForPushLockFree(repo: string, seconds = 30): void {
+  const lock = join(repo, '.git', 'gbrain-push.lock');
+  if (!existsSync(lock)) return;  // no hook has pushed yet
+  try {
+    execFileSync('flock', ['-w', String(seconds), lock, 'true'], { stdio: 'ignore' });
+  } catch { /* no flock(1) (macOS) — the hook doesn't take the lock there either */ }
+}
 
 let root: string, work: string, bare: string;
 let oldHome: string | undefined, oldGbrainHome: string | undefined;
@@ -73,8 +90,10 @@ beforeEach(async () => {
   git(work, 'remote', 'set-head', 'origin', 'main');
   await hardenBrainRepo({ repoPath: work, sourceId: 'wiki', pat: 'ghp_x', installCron: false });
   // Drain the background push the scaffolding commit just spawned, or it races the
-  // first `git add` of whichever test runs next.
+  // first `git add` of whichever test runs next — and keeps the push lock held under
+  // that test's own hook.
   await waitForHookSettled();
+  waitForPushLockFree(work);
 });
 afterEach(() => {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
@@ -151,8 +170,14 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
       // This assertion depends on a BACKGROUND process; without this the failure is
       // just "expected true, got false" with nothing to diagnose from.
       console.error('[diag] push log:\n' + (existsSync(log) ? readFileSync(log, 'utf-8') : '(no log)'));
+      let held = 'n/a';
+      try {
+        execFileSync('flock', ['-n', join(work, '.git', 'gbrain-push.lock'), 'true'], { stdio: 'ignore' });
+        held = 'free';
+      } catch { held = 'HELD'; }
       console.error('[diag] index.lock=' + existsSync(join(work, '.git', 'index.lock')) +
-                    ' push.lock=' + existsSync(join(work, '.git', 'gbrain-push.lock')));
+                    ' push.lock=' + existsSync(join(work, '.git', 'gbrain-push.lock')) +
+                    ' push.lock.state=' + held);
     }
     expect(found).toBe(true);
   });
