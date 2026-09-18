@@ -5,7 +5,7 @@
  * (the hook works even with the committed helper deleted).
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, statSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -53,23 +53,6 @@ async function waitForHookSettled(ms = 8000): Promise<boolean> {
   }
   return false;
 }
-/**
- * Second half of the barrier. brain_push holds an flock on $GIT_DIR/gbrain-push.lock
- * for its whole body, so the terminal log line is written INSIDE the critical section
- * — the lock outlives it by however long the detached subshell takes to exit.
- *
- * That matters because the hook serialises ALL pushes in the repo: hand the next
- * commit's hook a still-held lock and it blocks in `flock -w 30` having written
- * nothing at all, so a test waiting on its own hook's log line sees pure silence.
- * Acquiring the lock ourselves is the "previous hook has fully exited" condition.
- */
-function waitForPushLockFree(repo: string, seconds = 30): void {
-  const lock = join(repo, '.git', 'gbrain-push.lock');
-  if (!existsSync(lock)) return;  // no hook has pushed yet
-  try {
-    execFileSync('flock', ['-w', String(seconds), lock, 'true'], { stdio: 'ignore' });
-  } catch { /* no flock(1) (macOS) — the hook doesn't take the lock there either */ }
-}
 
 let root: string, work: string, bare: string;
 let oldHome: string | undefined, oldGbrainHome: string | undefined;
@@ -90,10 +73,8 @@ beforeEach(async () => {
   git(work, 'remote', 'set-head', 'origin', 'main');
   await hardenBrainRepo({ repoPath: work, sourceId: 'wiki', pat: 'ghp_x', installCron: false });
   // Drain the background push the scaffolding commit just spawned, or it races the
-  // first `git add` of whichever test runs next — and keeps the push lock held under
-  // that test's own hook.
+  // first `git add` of whichever test runs next.
   await waitForHookSettled();
-  waitForPushLockFree(work);
 });
 afterEach(() => {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
@@ -160,7 +141,12 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
     writeFileSync(join(work, 'orphan.md'), 'o\n');
     git(work, 'add', 'orphan.md'); git(work, 'commit', '-qm', 'orphan');
     const log = join(process.env.GBRAIN_HOME!, 'brain-push.log');
-    const deadline = Date.now() + 8000;
+    // The hook has to fail a push AND a rebase-pull against an unreachable remote
+    // before it logs. Measured at ~9s on a CI runner, so 8s was never enough — it
+    // only ever passed because beforeEach's own hook, losing its remote to the
+    // set-url above mid-flight, wrote this line in ~150ms. Deadline on an
+    // observable condition, not a sleep; the file's own budget in CI is 60s.
+    const deadline = Date.now() + 30000;
     let found = false;
     while (Date.now() < deadline) {
       if (existsSync(log) && readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) { found = true; break; }
@@ -170,31 +156,6 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
       // This assertion depends on a BACKGROUND process; without this the failure is
       // just "expected true, got false" with nothing to diagnose from.
       console.error('[diag] push log:\n' + (existsSync(log) ? readFileSync(log, 'utf-8') : '(no log)'));
-      let held = 'n/a';
-      try {
-        execFileSync('flock', ['-n', join(work, '.git', 'gbrain-push.lock'), 'true'], { stdio: 'ignore' });
-        held = 'free';
-      } catch { held = 'HELD'; }
-      console.error('[diag] index.lock=' + existsSync(join(work, '.git', 'index.lock')) +
-                    ' push.lock=' + existsSync(join(work, '.git', 'gbrain-push.lock')) +
-                    ' push.lock.state=' + held);
-      const hook = join(work, '.git', 'hooks', 'post-commit');
-      let mode = 'missing';
-      try { mode = (statSync(hook).mode & 0o777).toString(8); } catch { /* */ }
-      console.error('[diag] hook=' + existsSync(hook) + ' mode=' + mode +
-                    ' head=' + git(work, 'log', '-1', '--format=%H %s') +
-                    ' remote=' + git(work, 'remote', 'get-url', 'origin'));
-      // Run the hook by hand: if THIS produces a log line, the hook is fine and the
-      // question is why git's own invocation of it produced nothing.
-      try {
-        execFileSync('bash', [hook], { cwd: work, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
-        const t = Date.now();
-        while (Date.now() - t < 5000) {
-          if (readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) break;
-          await new Promise(r => setTimeout(r, 25));
-        }
-        console.error('[diag] manual hook run -> log now:\n' + readFileSync(log, 'utf-8'));
-      } catch (e: any) { console.error('[diag] manual hook run FAILED: ' + e.message); }
     }
     expect(found).toBe(true);
   });
