@@ -747,12 +747,40 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   app.use(authRouter);
 
   // ---------------------------------------------------------------------------
-  // Health check — liveness only. Full engine stats live at
-  // /admin/api/full-stats (requireAdmin). See probeLiveness above for the why.
+  // Health check — READINESS semantics: 503 while the database is unreachable,
+  // which is what should pull this pod out of the Service endpoints.
+  // Full engine stats live at /admin/api/full-stats (requireAdmin).
   // ---------------------------------------------------------------------------
   app.get('/health', async (_req, res) => {
     const result = await probeLiveness(sql, config.engine || 'pglite', VERSION);
     res.status(result.status).json(result.body);
+  });
+
+  // ---------------------------------------------------------------------------
+  // BLO-21615: LIVENESS, and deliberately not database-dependent.
+  //
+  // /health was wired to BOTH probes in paperclip/gbrain-mcp.yaml, so a
+  // Postgres blip made it 503 and the kubelet SIGKILLed admin-ui ~180s later
+  // (exitCode 137 at a 209s container lifetime, measured 2026-08-22). That is a
+  // category error: restarting this container cannot fix Postgres, and it tears
+  // down every in-flight MCP request across the fleet to achieve nothing.
+  //
+  // Liveness asks "is this process wedged?". Serving this response at all
+  // proves the event loop turns and the HTTP server accepts — which is the
+  // whole question. Dependency health belongs to readiness, above.
+  // ponytail: no event-loop-lag check; add one if a wedge ever survives this.
+  //
+  // CROSS-REPO COUPLING — /livez cannot cover STARTUP. The port is not bound
+  // until connectWithRetry resolves (cli.ts connectEngine, then app.listen at
+  // the foot of this function), so during the connect budget a probe here gets
+  // ECONNREFUSED, not 200. paperclip/gbrain-mcp.yaml (Blockcast/onprem-k8s)
+  // must therefore carry a startupProbe whose failureThreshold × periodSeconds
+  // exceeds GBRAIN_CONNECT_TIMEOUT_MS, or the kubelet kills a process that is
+  // still legitimately retrying. Measured live 2026-09-18: 200 × 10s = 2000s
+  // against a 1800s budget. Change either number and re-check the other.
+  // ---------------------------------------------------------------------------
+  app.get('/livez', (_req, res) => {
+    res.status(200).json({ status: 'ok', version: VERSION });
   });
 
   // ---------------------------------------------------------------------------
