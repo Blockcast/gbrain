@@ -5,7 +5,7 @@
  * (the hook works even with the committed helper deleted).
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -178,6 +178,23 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
       console.error('[diag] index.lock=' + existsSync(join(work, '.git', 'index.lock')) +
                     ' push.lock=' + existsSync(join(work, '.git', 'gbrain-push.lock')) +
                     ' push.lock.state=' + held);
+      const hook = join(work, '.git', 'hooks', 'post-commit');
+      let mode = 'missing';
+      try { mode = (statSync(hook).mode & 0o777).toString(8); } catch { /* */ }
+      console.error('[diag] hook=' + existsSync(hook) + ' mode=' + mode +
+                    ' head=' + git(work, 'log', '-1', '--format=%H %s') +
+                    ' remote=' + git(work, 'remote', 'get-url', 'origin'));
+      // Run the hook by hand: if THIS produces a log line, the hook is fine and the
+      // question is why git's own invocation of it produced nothing.
+      try {
+        execFileSync('bash', [hook], { cwd: work, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const t = Date.now();
+        while (Date.now() - t < 5000) {
+          if (readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) break;
+          await new Promise(r => setTimeout(r, 25));
+        }
+        console.error('[diag] manual hook run -> log now:\n' + readFileSync(log, 'utf-8'));
+      } catch (e: any) { console.error('[diag] manual hook run FAILED: ' + e.message); }
     }
     expect(found).toBe(true);
   });
