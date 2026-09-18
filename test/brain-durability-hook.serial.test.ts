@@ -147,6 +147,13 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
       if (existsSync(log) && readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) { found = true; break; }
       await new Promise(r => setTimeout(r, 150));
     }
+    if (!found) {
+      // This assertion depends on a BACKGROUND process; without this the failure is
+      // just "expected true, got false" with nothing to diagnose from.
+      console.error('[diag] push log:\n' + (existsSync(log) ? readFileSync(log, 'utf-8') : '(no log)'));
+      console.error('[diag] index.lock=' + existsSync(join(work, '.git', 'index.lock')) +
+                    ' push.lock=' + existsSync(join(work, '.git', 'gbrain-push.lock')));
+    }
     expect(found).toBe(true);
   });
 });
