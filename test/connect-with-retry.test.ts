@@ -43,7 +43,8 @@ describe('connectWithRetry / isRetryableDbConnectError', () => {
       },
     } as unknown as Parameters<typeof connectWithRetry>[0];
 
-    await connectWithRetry(fakeEngine, { database_url: 'postgres://x' }, { baseDelayMs: 1, log: () => {} });
+    await connectWithRetry(fakeEngine, { database_url: 'postgres://x' },
+      { baseDelayMs: 1, maxElapsedMs: 5_000, log: () => {} });
     expect(attempts).toBe(3);
   });
 
@@ -84,7 +85,8 @@ describe('connectWithRetry / isRetryableDbConnectError', () => {
       },
     } as unknown as Parameters<typeof connectWithRetry>[0];
 
-    await connectWithRetry(fakeEngine, { database_url: 'postgres://x' }, { baseDelayMs: 1, log: () => {} });
+    await connectWithRetry(fakeEngine, { database_url: 'postgres://x' },
+      { baseDelayMs: 1, maxElapsedMs: 5_000, log: () => {} });
     expect(attempts).toBe(2);
   });
 
@@ -109,6 +111,32 @@ describe('connectWithRetry / isRetryableDbConnectError', () => {
     ).rejects.toThrow('connection refused');
     expect(attempts).toBeGreaterThan(1);          // it retried...
     expect(Date.now() - started).toBeLessThan(2_000); // ...and still terminated.
+  });
+
+  // BLO-21615 round 2 / Ally's Important finding on #13: the give-up test was
+  // `Date.now() + delay >= deadline`, which ABANDONS the unspent remainder
+  // rather than clamping the last sleep to it. Walking the shipped defaults
+  // (1s base, 15s ceiling, 30s budget) it quit at t≈15s — half the advertised
+  // patience, and inside the window a Postgres restart occupies.
+  //
+  // Scaled 100×: 10ms base, 150ms ceiling, 300ms budget. Failures land at
+  // t≈0/10/30/70/150; at t≈150 the next delay is the 150ms ceiling, so the old
+  // code gave up there. Clamped, it sleeps the remaining 150ms and gives up at
+  // t≈300. Asserting elapsed ≥ 250ms is what distinguishes the two.
+  test('connectWithRetry: spends the WHOLE budget, not half of it (BLO-21615)', async () => {
+    const { connectWithRetry } = await import('../src/core/db.ts');
+    const fakeEngine = {
+      connect: async () => { throw new Error('connect ECONNREFUSED 10.0.0.1:5432'); },
+    } as unknown as Parameters<typeof connectWithRetry>[0];
+
+    const started = Date.now();
+    await expect(
+      connectWithRetry(fakeEngine, { database_url: 'postgres://x' },
+        { baseDelayMs: 10, maxDelayMs: 150, maxElapsedMs: 300, log: () => {} })
+    ).rejects.toThrow('ECONNREFUSED');
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(250);  // used the budget...
+    expect(elapsed).toBeLessThan(1_500);          // ...and did not overshoot it.
   });
 
   test('connectWithRetry: permanent error does NOT retry', async () => {

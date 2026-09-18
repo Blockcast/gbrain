@@ -769,6 +769,15 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // proves the event loop turns and the HTTP server accepts — which is the
   // whole question. Dependency health belongs to readiness, above.
   // ponytail: no event-loop-lag check; add one if a wedge ever survives this.
+  //
+  // CROSS-REPO COUPLING — /livez cannot cover STARTUP. The port is not bound
+  // until connectWithRetry resolves (cli.ts connectEngine, then app.listen at
+  // the foot of this function), so during the connect budget a probe here gets
+  // ECONNREFUSED, not 200. paperclip/gbrain-mcp.yaml (Blockcast/onprem-k8s)
+  // must therefore carry a startupProbe whose failureThreshold × periodSeconds
+  // exceeds GBRAIN_CONNECT_TIMEOUT_MS, or the kubelet kills a process that is
+  // still legitimately retrying. Measured live 2026-09-18: 200 × 10s = 2000s
+  // against a 1800s budget. Change either number and re-check the other.
   // ---------------------------------------------------------------------------
   app.get('/livez', (_req, res) => {
     res.status(200).json({ status: 'ok', version: VERSION });

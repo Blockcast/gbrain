@@ -11,11 +11,11 @@ All notable changes to GBrain will be documented in this file.
 Separately, `/health` was wired to **both** the liveness and readiness probes, so a database blip made it 503 and the kubelet SIGKILLed the container ~180s later (exitCode 137 at a 209s lifetime, measured 2026-08-22). Restarting this container cannot fix Postgres, and it tears down every in-flight MCP request across the fleet to achieve nothing.
 
 ### Added
-- **`/livez` — liveness, deliberately not database-dependent.** Liveness asks "is this process wedged?"; serving the response at all proves the event loop turns and the HTTP server accepts. Dependency health belongs to readiness, which is what `/health` now is (503 while the database is unreachable, pulling the pod out of Service endpoints rather than killing it).
+- **`/livez` — liveness, deliberately not database-dependent.** Liveness asks "is this process wedged?"; serving the response at all proves the event loop turns and the HTTP server accepts. Dependency health belongs to readiness — which is what `/health` has always effectively been (`probeLiveness` already returned 503 on database failure), now documented and wired as such, so a database outage pulls the pod out of Service endpoints rather than killing it. Note `/livez` covers a *mid-life* outage only: the port is not bound until the initial connect succeeds, so startup is covered by a `startupProbe` sized to the connect budget, not by this endpoint.
 - **Terminal connect failures are recorded to `/dev/termination-log`.** The crashing container's logs are not retained, so every post-mortem so far had a restart count and no cause. Kubernetes surfaces this file as `lastState.terminated.message` for the *previous* container — the one durable channel available. Best-effort: it never masks the real error.
 
 ### Changed
-- **The connect retry budget is wall-clock, not attempt-count.** Default 30s keeps interactive CLI commands snappy; the long-lived server raises it via `GBRAIN_CONNECT_TIMEOUT_MS`. Backoff is capped by `maxDelayMs` so a long budget does not degenerate into one enormous sleep, and the deadline is checked against the sleep about to be taken, so the budget is never overshot.
+- **The connect retry budget is wall-clock, not attempt-count.** Default 30s keeps interactive CLI commands snappy; the long-lived server raises it via `GBRAIN_CONNECT_TIMEOUT_MS`. Backoff is capped by `maxDelayMs` so a long budget does not degenerate into one enormous sleep, and the final sleep is clamped to the time left rather than abandoned — so 30s of budget means 30s of patience, and the deadline is still never overshot.
 
 ## [0.42.51.1] - 2026-08-07
 

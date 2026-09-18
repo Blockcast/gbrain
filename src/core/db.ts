@@ -367,18 +367,26 @@ export interface ConnectWithRetryOpts {
  * still returns for the PREVIOUS container — the one durable channel we have.
  * Best-effort by design: never let diagnostics mask the real error.
  */
-function recordTerminalConnectFailure(e: unknown, attempt: number, elapsedMs: number): void {
-  const msg = e instanceof Error ? e.message : String(e);
-  const cls = e instanceof Error ? e.constructor.name : typeof e;
-  const code = (e as { code?: unknown } | null)?.code;
-  const line =
-    `gbrain connect gave up: class=${cls} code=${code ?? 'none'} ` +
-    `retryable=${isRetryableDbConnectError(e)} attempts=${attempt} elapsedMs=${elapsedMs} ` +
-    `msg=${msg.slice(0, 300)}`;
-  console.error(`[connect] ${line}`);
+function recordTerminalConnectFailure(
+  e: unknown,
+  attempt: number,
+  elapsedMs: number,
+  log: (line: string) => void,
+): void {
+  // Whole body inside the try: String(e), the template literal and
+  // isRetryableDbConnectError are all total for realistic driver errors, but
+  // "never mask the real error" should hold unconditionally, not by luck.
   try {
+    const msg = e instanceof Error ? e.message : String(e);
+    const cls = e instanceof Error ? e.constructor.name : typeof e;
+    const code = (e as { code?: unknown } | null)?.code;
+    const line =
+      `gbrain connect gave up: class=${cls} code=${code ?? 'none'} ` +
+      `retryable=${isRetryableDbConnectError(e)} attempts=${attempt} elapsedMs=${elapsedMs} ` +
+      `msg=${msg.slice(0, 300)}`;
+    log(`[connect] ${line}`);
     writeFileSync('/dev/termination-log', `${line}\n`);
-  } catch { /* not on Kubernetes, or read-only — the console line above stands */ }
+  } catch { /* not on Kubernetes, read-only, or a hostile error — the throw stands */ }
 }
 
 export async function connectWithRetry(
@@ -402,13 +410,19 @@ export async function connectWithRetry(
       await engine.connect(config);
       return;
     } catch (e: unknown) {
-      const delay = Math.min(baseDelayMs * Math.pow(2, i), maxDelayMs);
-      // Check the deadline against the sleep we are about to take, so we never
-      // overshoot the budget and never sleep knowing we will not retry after.
-      if (noRetry || !isRetryableDbConnectError(e) || Date.now() + delay >= deadline) {
-        recordTerminalConnectFailure(e, i + 1, Date.now() - startedAt);
+      const remaining = deadline - Date.now();
+      // Give up only once the budget is actually spent, and clamp the last
+      // sleep to what is left — so a 30s budget means 30s. Testing
+      // `Date.now() + delay >= deadline` instead would abandon the unspent
+      // remainder: under the default backoff (1s base, 15s ceiling, 30s
+      // budget) failures land at t≈0/1/3/7/15s and the next delay is 15s, so
+      // it would quit at t≈15s with half the budget unused — inside exactly
+      // the window a Postgres pod restart occupies.
+      if (noRetry || !isRetryableDbConnectError(e) || remaining <= 0) {
+        recordTerminalConnectFailure(e, i + 1, Date.now() - startedAt, log);
         throw e;
       }
+      const delay = Math.min(baseDelayMs * Math.pow(2, i), maxDelayMs, remaining);
       const msg = e instanceof Error ? e.message : String(e);
       log(`[connect] attempt ${i + 1} failed (${msg.slice(0, 80)}), retrying in ${delay}ms`);
       await new Promise(resolve => setTimeout(resolve, delay));
