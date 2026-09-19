@@ -13,7 +13,13 @@ import { hardenBrainRepo } from '../src/core/brain-repo-durability.ts';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-C', cwd, '-c', 'protocol.file.allow=always', ...args], {
-    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8',
+    // The env option is NOT optional here. bun (<=1.3.13, the CI pin) snapshots
+    // the environment at process start and does NOT propagate later
+    // process.env mutations to execFileSync children when it is omitted.
+    // beforeEach sets HOME/GBRAIN_HOME at runtime, so without this the
+    // post-commit hook appends to the REAL ~/.gbrain/brain-push.log and the
+    // temp log this file asserts on never grows.
+    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', env: process.env,
   }).trim();
 }
 function originHead(bare: string): string {
@@ -24,6 +30,41 @@ async function waitForOrigin(bare: string, expectSha: string, ms = 8000): Promis
   while (Date.now() < deadline) {
     try { if (originHead(bare) === expectSha) return true; } catch { /* */ }
     await new Promise(r => setTimeout(r, 150));
+  }
+  return false;
+}
+
+// Terminal lines of the hook's brain_push — one is appended on every exit path,
+// after all of its git subprocesses have exited.
+const HOOK_SETTLED = /\[push\] (ok|ok-after-rebase|LOCAL-ONLY|lock-timeout|detached)/;
+function pushLog(): string { return join(process.env.GBRAIN_HOME!, 'brain-push.log'); }
+/**
+ * Barrier on the background post-commit push having FINISHED.
+ *
+ * `waitForOrigin` returns as soon as the ref lands on the remote, which is not the
+ * same event: the hook can still be inside `git pull --rebase` holding
+ * `.git/index.lock`, and the next `git add` then dies with
+ * "Unable to create '.git/index.lock': File exists".
+ *
+ * hardenBrainRepo() commits the scaffolding (firing the hook -> background push)
+ * AND pushes synchronously itself. The two race; the background one loses, rebases,
+ * and takes index.lock a few ms after hardenBrainRepo has already returned — so
+ * beforeEach must drain it before any test touches the index.
+ *
+ * PRECONDITION — this matches the FIRST terminal line anywhere in the log, so it is
+ * only a barrier on "the one hook invocation that has run so far". That holds because
+ * beforeEach mints a fresh GBRAIN_HOME (hence a fresh, empty log) per test, the `init`
+ * commit predates hook installation, and commitScaffolding makes exactly one commit.
+ * A second call site, or a second commit in commitScaffolding, breaks it — match on
+ * the Nth line then, don't just call this again. Same caveat for `lock-timeout`: it
+ * means a DIFFERENT brain_push still holds the lock, so it is only a safe member of
+ * HOOK_SETTLED while a single invocation is in flight.
+ */
+async function waitForHookSettled(ms = 8000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (existsSync(pushLog()) && HOOK_SETTLED.test(readFileSync(pushLog(), 'utf-8'))) return true;
+    await new Promise(r => setTimeout(r, 25));
   }
   return false;
 }
@@ -46,6 +87,14 @@ beforeEach(async () => {
   git(work, 'add', 'README.md'); git(work, 'commit', '-qm', 'init'); git(work, 'push', '-q', 'origin', 'main');
   git(work, 'remote', 'set-head', 'origin', 'main');
   await hardenBrainRepo({ repoPath: work, sourceId: 'wiki', pat: 'ghp_x', installCron: false });
+  // Drain the background push the scaffolding commit just spawned, or it races the
+  // first `git add` of whichever test runs next. Loud on timeout: a silent `false`
+  // here leaves beforeEach behaving exactly as it did before this fix — the index.lock
+  // race returns AND test 3 goes back to passing vacuously, while the suite reports green.
+  if (!await waitForHookSettled()) {
+    throw new Error('scaffolding hook did not settle within 8s; push log:\n'
+      + (existsSync(pushLog()) ? readFileSync(pushLog(), 'utf-8') : '(no log)'));
+  }
 });
 afterEach(() => {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
@@ -111,12 +160,20 @@ describe('post-commit hook (D9 local, D7 self-contained)', () => {
     git(work, 'remote', 'set-url', 'origin', join(root, 'gone2.git'));
     writeFileSync(join(work, 'orphan.md'), 'o\n');
     git(work, 'add', 'orphan.md'); git(work, 'commit', '-qm', 'orphan');
-    const log = join(process.env.GBRAIN_HOME!, 'brain-push.log');
+    const log = pushLog();
+    // Before the beforeEach drain this only ever passed by accident: the
+    // scaffolding hook, losing its remote to the set-url above mid-flight,
+    // wrote this line itself. Now it is this commit's own hook that must.
     const deadline = Date.now() + 8000;
     let found = false;
     while (Date.now() < deadline) {
       if (existsSync(log) && readFileSync(log, 'utf-8').includes('NEEDS ATTENTION')) { found = true; break; }
       await new Promise(r => setTimeout(r, 150));
+    }
+    if (!found) {
+      // This assertion depends on a BACKGROUND process; without this the failure is
+      // just "expected true, got false" with nothing to diagnose from.
+      console.error('[diag] push log:\n' + (existsSync(log) ? readFileSync(log, 'utf-8') : '(no log)'));
     }
     expect(found).toBe(true);
   });
