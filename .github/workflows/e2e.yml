@@ -81,9 +81,9 @@ jobs:
       - name: Install OpenClaw
         # Bound + retry the install: a transient npm/registry stall here used to
         # hang unbounded and (since the v0.42.50.0 job timeout) burn the entire
-        # 30m Tier 2 budget before failing — even though the install normally
-        # finishes in well under a minute. `timeout` kills a hung attempt fast;
-        # up to 3 attempts ride out a flaky registry. Step cap is a backstop.
+        # 30m Tier 2 budget before failing. ARC's cold npm install can take a
+        # few minutes, so `timeout` bounds each attempt; up to 3 attempts ride
+        # out a slow or flaky registry. Step cap is a backstop.
         timeout-minutes: 16
         run: |
           prefix="$RUNNER_TEMP/openclaw"
