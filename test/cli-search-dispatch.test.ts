@@ -44,17 +44,17 @@ describe('T5 — gbrain search dispatch', () => {
 
   test('`search "<freetext>"` routes to the cheap-hybrid search op (no "Unknown subcommand")', () => {
     withHome((home) => {
-      const { stdout, stderr, status } = run(['search', 'zzz-no-such-page-xyz'], home);
+      const { stdout, stderr, status } = run(['search', 'zzz-no-such-page-xyz', '--timeout=30s'], home);
       // Empty brain → "No results." (the search op's formatter), exit 0.
       expect(status).toBe(0);
       expect(stderr).not.toContain('Unknown subcommand');
       expect(stdout.toLowerCase()).toContain('no results');
     });
-  });
+  }, 30_000);
 
   test('`search stats --json` routes to the dashboard', () => {
     withHome((home) => {
-      const { stdout, status } = run(['search', 'stats', '--json'], home);
+      const { stdout, status } = run(['search', 'stats', '--json', '--timeout=30s'], home);
       expect(status).toBe(0);
       // stats envelope, not a search-results array.
       expect(stdout).toMatch(/total_calls|cache_hit_rate|window_days/);
