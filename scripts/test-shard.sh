@@ -108,4 +108,6 @@ fi
 
 # Convert newline-separated file list to argv. xargs handles the
 # whitespace correctly without word-splitting on spaces in paths.
-printf '%s\n' "$SHARD_FILES" | xargs bun test --timeout=60000
+# Keep the shard marker consistent with the local parallel runner. Some tests
+# use it to distinguish a contention-heavy CI shard from a solo local run.
+printf '%s\n' "$SHARD_FILES" | env SHARD="$SHARD_INDEX/$TOTAL_SHARDS" xargs bun test --timeout=60000
