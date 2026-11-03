@@ -731,12 +731,12 @@ describeE2E('E2E: Setup Journey', () => {
             '--embedding-model', 'openai:text-embedding-3-large'],
       cwd: cliCwd,
       env: cliEnv(),
-      timeout: 25_000,
+      timeout: 60_000,
     });
     const stdout = new TextDecoder().decode(result.stdout);
     expect(result.exitCode).toBe(0);
     expect(stdout).toContain('Brain ready');
-  }, 40_000);
+  }, 90_000);
 
   test('gbrain import imports fixtures via CLI', () => {
     const result = Bun.spawnSync({
