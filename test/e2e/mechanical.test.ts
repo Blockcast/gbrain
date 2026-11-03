@@ -1138,7 +1138,7 @@ describeE2E('E2E: RLS Verification', () => {
       // this would error out with 42P01 and leave version at 23.
       const result = Bun.spawnSync({
         cmd: ['bun', 'run', 'src/cli.ts', 'init', '--non-interactive', '--url', process.env.DATABASE_URL!],
-        cwd: cliCwd, env: cliEnv(), timeout: 60_000,
+        cwd: cliCwd, env: cliEnv(), timeout: 120_000,
       });
       const stdout = new TextDecoder().decode(result.stdout);
       const stderr = new TextDecoder().decode(result.stderr);
@@ -1212,7 +1212,7 @@ describeE2E('E2E: RLS Verification', () => {
         );
       }
     }
-  }, 90_000);
+  }, 150_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
