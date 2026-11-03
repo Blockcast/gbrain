@@ -22,7 +22,7 @@ concurrency:
 jobs:
   tier1:
     name: Tier 1 (Mechanical)
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'default' }}
+    runs-on: default
     timeout-minutes: 20
     services:
       postgres:
@@ -51,7 +51,7 @@ jobs:
 
   tier2:
     name: Tier 2 (LLM Skills)
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'default' }}
+    runs-on: default
     # Runs on every push/PR now (promoted from schedule-only in v0.19.0).
     # Tier 1 must pass first; Tier 2 uses OPENAI_API_KEY + ANTHROPIC_API_KEY
     # from repo/org secrets. Nightly + manual triggers still supported via
