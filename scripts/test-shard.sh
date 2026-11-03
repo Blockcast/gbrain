@@ -67,15 +67,19 @@ cd "$(dirname "$0")/.."
 #   - entity-resolve-perf.slow.test.ts (~159s, single non-subdivisible
 #     perf test)
 #     → job: slow-entity-resolve-perf
+#   - cycle/synthesize-concepts-progress.test.ts (shared-PGLite reset hooks)
+#     → job: test-synthesize-concepts-progress
 #
-# Removing both heavy atoms from matrix-eligible files keeps the per-shard
-# total bounded. With 10 matrix shards the per-shard total drops to ~272s.
+# Removing the two heavy atoms and the contention-prone PGLite suite from
+# matrix-eligible files keeps the per-shard total bounded. With 10 matrix
+# shards the per-shard total remains in the same ~272s range.
 # Dedicated jobs run in parallel so total CI wallclock = max(matrix ~4.5min,
 # slow-eval ~3.3min, slow-entity-resolve-perf ~2.6min) ≈ 4.5min.
 ALL_FILES=$(find test -name '*.test.ts' \
   -not -name '*.serial.test.ts' \
   -not -name 'eval-longmemeval-e2e.slow.test.ts' \
   -not -name 'entity-resolve-perf.slow.test.ts' \
+  -not -path 'test/cycle/synthesize-concepts-progress.test.ts' \
   -not -path 'test/e2e/*' | sort)
 
 if [ -z "$ALL_FILES" ]; then
