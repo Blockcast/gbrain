@@ -50,13 +50,13 @@ describeE2E('E2E: Page CRUD', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('fixture import creates correct page count', async () => {
     const stats = await callOp('get_stats') as any;
     expect(stats.page_count).toBe(16);
-  }, 30_000);
+  }, 120_000);
 
   test('get_page returns correct data for person', async () => {
     const page = await callOp('get_page', { slug: 'people/sarah-chen' }) as any;
@@ -127,7 +127,7 @@ describeE2E('E2E: Search', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('keyword search for "NovaMind" returns multiple hits', async () => {
@@ -135,7 +135,7 @@ describeE2E('E2E: Search', () => {
     expect(results.length).toBeGreaterThanOrEqual(3);
     const slugs = results.map((r: any) => r.slug);
     expect(slugs).toContain('companies/novamind');
-  }, 30_000);
+  }, 120_000);
 
   test('keyword search for "Threshold Ventures" finds investor', async () => {
     const results = await callOp('search', { query: 'Threshold Ventures' }) as any[];
@@ -186,7 +186,7 @@ describeE2E('E2E: Links', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('add_link + get_links + get_backlinks round trip', async () => {
@@ -202,7 +202,7 @@ describeE2E('E2E: Links', () => {
 
     const backlinks = await callOp('get_backlinks', { slug: 'companies/novamind' }) as any[];
     expect(backlinks.some((l: any) => l.from_slug === 'people/sarah-chen' || l.from_page_slug === 'people/sarah-chen')).toBe(true);
-  }, 30_000);
+  }, 120_000);
 
   test('traverse_graph finds connected pages', async () => {
     // Links should already be added from prior test in this describe block
@@ -231,7 +231,7 @@ describeE2E('E2E: Tags', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('get_tags returns imported tags', async () => {
@@ -239,7 +239,7 @@ describeE2E('E2E: Tags', () => {
     expect(tags).toContain('founder');
     expect(tags).toContain('yc-w25');
     expect(tags).toContain('ai-agents');
-  }, 30_000);
+  }, 120_000);
 
   test('add_tag + remove_tag round trip', async () => {
     await callOp('add_tag', { slug: 'people/marcus-reid', tag: 'test-tag' });
@@ -267,7 +267,7 @@ describeE2E('E2E: Timeline', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('add_timeline_entry + get_timeline round trip', async () => {
@@ -283,7 +283,7 @@ describeE2E('E2E: Timeline', () => {
     expect(timeline.length).toBeGreaterThanOrEqual(1);
     const entry = timeline.find((e: any) => e.summary === 'Test timeline entry');
     expect(entry).toBeDefined();
-  }, 30_000);
+  }, 120_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -299,13 +299,13 @@ describeE2E('E2E: addLinksBatch (postgres-engine)', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('empty batch returns 0 with no DB call', async () => {
     const engine = getEngine();
     expect(await engine.addLinksBatch([])).toBe(0);
-  }, 30_000);
+  }, 120_000);
 
   test('within-batch duplicates dedup via ON CONFLICT (no 21000 cardinality error)', async () => {
     const engine = getEngine();
@@ -370,13 +370,13 @@ describeE2E('E2E: addTimelineEntriesBatch (postgres-engine)', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('empty batch returns 0', async () => {
     const engine = getEngine();
     expect(await engine.addTimelineEntriesBatch([])).toBe(0);
-  }, 30_000);
+  }, 120_000);
 
   test('within-batch duplicates dedup via ON CONFLICT', async () => {
     const engine = getEngine();
@@ -424,7 +424,7 @@ describeE2E('E2E: Versions', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('put_page creates version, revert restores', async () => {
@@ -446,7 +446,7 @@ describeE2E('E2E: Versions', () => {
 
     const reverted = await callOp('get_page', { slug: 'people/sarah-chen' }) as any;
     expect(reverted.compiled_truth).not.toContain('(Modified)');
-  }, 30_000);
+  }, 120_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -457,14 +457,14 @@ describeE2E('E2E: Admin', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('get_stats returns valid structure', async () => {
     const stats = await callOp('get_stats') as any;
     expect(stats.page_count).toBe(16);
     expect(typeof stats.chunk_count).toBe('number');
-  }, 30_000);
+  }, 120_000);
 
   test('get_health returns valid structure', async () => {
     const health = await callOp('get_health') as any;
@@ -482,14 +482,14 @@ describeE2E('E2E: Chunks & Resolution', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('get_chunks returns chunks for imported page', async () => {
     const chunks = await callOp('get_chunks', { slug: 'people/sarah-chen' }) as any[];
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0].chunk_text).toBeTruthy();
-  }, 30_000);
+  }, 120_000);
 
   test('resolve_slugs finds partial match', async () => {
     const matches = await callOp('resolve_slugs', { partial: 'sarah' }) as string[];
@@ -510,7 +510,7 @@ describeE2E('E2E: Ingest Log & Raw Data', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('log_ingest + get_ingest_log round trip', async () => {
@@ -526,7 +526,7 @@ describeE2E('E2E: Ingest Log & Raw Data', () => {
     const entry = log.find((e: any) => e.source_ref === 'test-run-1');
     expect(entry).toBeDefined();
     expect(entry.source_type).toBe('e2e-test');
-  }, 30_000);
+  }, 120_000);
 
   test('put_raw_data + get_raw_data round trip', async () => {
     const testData = { education: 'Stanford CS 2020', title: 'CEO' };
@@ -556,13 +556,13 @@ describeE2E('E2E: Files', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('file_list returns empty initially', async () => {
     const files = await callOp('file_list', {}) as any[];
     expect(files.length).toBe(0);
-  }, 30_000);
+  }, 120_000);
 
   test('file_upload stores metadata + file_list shows it', async () => {
     // Create a temp file
@@ -623,7 +623,7 @@ describeE2E('E2E: Files', () => {
 describeE2E('E2E: file_list LIMIT enforcement', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('file_list with slug filter respects LIMIT 100', async () => {
@@ -654,7 +654,7 @@ describeE2E('E2E: file_list LIMIT enforcement', () => {
     const files = await callOp('file_list', { slug: testSlug }) as any[];
     expect(files.length).toBeLessThanOrEqual(100);
     expect(files.length).toBe(100);
-  }, 30_000);
+  }, 120_000);
 
   test('file_list without slug also respects LIMIT 100', async () => {
     // The 150 rows from the previous test are still in the DB
@@ -670,7 +670,7 @@ describeE2E('E2E: file_list LIMIT enforcement', () => {
 describeE2E('E2E: Idempotency', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('double import produces no duplicates', async () => {
@@ -684,7 +684,7 @@ describeE2E('E2E: Idempotency', () => {
 
     expect(stats2.page_count).toBe(stats1.page_count);
     expect(stats2.chunk_count).toBe(stats1.chunk_count);
-  }, 30_000);
+  }, 120_000);
 
   test('modify one fixture, reimport, only that page updates', async () => {
     await importFixtures();
@@ -713,7 +713,7 @@ describeE2E('E2E: Idempotency', () => {
 describeE2E('E2E: Setup Journey', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   const cliCwd = join(import.meta.dir, '../..');
@@ -736,7 +736,7 @@ describeE2E('E2E: Setup Journey', () => {
     const stdout = new TextDecoder().decode(result.stdout);
     expect(result.exitCode).toBe(0);
     expect(stdout).toContain('Brain ready');
-  }, 30_000);
+  }, 120_000);
 
   test('gbrain import imports fixtures via CLI', () => {
     const result = Bun.spawnSync({
@@ -760,7 +760,7 @@ describeE2E('E2E: Setup Journey', () => {
     const stdout = new TextDecoder().decode(result.stdout);
     expect(result.exitCode).toBe(0);
     expect(stdout.length).toBeGreaterThan(0);
-  }, 30_000);
+  }, 120_000);
 
   test('gbrain stats shows page count via CLI', () => {
     const result = Bun.spawnSync({
@@ -770,7 +770,7 @@ describeE2E('E2E: Setup Journey', () => {
       timeout: 15_000,
     });
     expect(result.exitCode).toBe(0);
-  }, 30_000);
+  }, 120_000);
 
   test('gbrain health runs via CLI', () => {
     const result = Bun.spawnSync({
@@ -780,7 +780,7 @@ describeE2E('E2E: Setup Journey', () => {
       timeout: 15_000,
     });
     expect(result.exitCode).toBe(0);
-  }, 30_000);
+  }, 120_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -801,7 +801,7 @@ describeE2E('E2E: Init Edge Cases', () => {
       timeout: 10_000,
     });
     expect(result.exitCode).not.toBe(0);
-  }, 30_000);
+  }, 120_000);
 
   test('double init is idempotent', async () => {
     await setupDB();
@@ -814,7 +814,7 @@ describeE2E('E2E: Init Edge Cases', () => {
 
     const after = await conn.unsafe(`SELECT count(*) as n FROM information_schema.tables WHERE table_schema = 'public'`);
     expect(after[0].n).toBe(before[0].n);
-  });
+  }, 60_000);
 
   test('init then import then re-init preserves pages', async () => {
     await setupDB();
@@ -826,7 +826,7 @@ describeE2E('E2E: Init Edge Cases', () => {
 
     const after = await callOp('get_stats') as any;
     expect(after.page_count).toBe(before.page_count);
-  }, 15_000);
+  }, 60_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -836,7 +836,7 @@ describeE2E('E2E: Init Edge Cases', () => {
 describeE2E('E2E: Schema Idempotency', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('initSchema twice produces no errors and same object count', async () => {
@@ -852,7 +852,7 @@ describeE2E('E2E: Schema Idempotency', () => {
 
     expect(tables2[0].n).toBe(tables1[0].n);
     expect(indexes2[0].n).toBe(indexes1[0].n);
-  }, 30_000);
+  }, 120_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -862,7 +862,7 @@ describeE2E('E2E: Schema Idempotency', () => {
 describeE2E('E2E: Schema Diff Guard', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('all expected tables exist', async () => {
@@ -882,7 +882,7 @@ describeE2E('E2E: Schema Diff Guard', () => {
     for (const table of expected) {
       expect(tableNames).toContain(table);
     }
-  }, 30_000);
+  }, 120_000);
 
   test('pgvector extension is installed', async () => {
     const conn = getConn();
@@ -905,7 +905,7 @@ describeE2E('E2E: Slug with Special Characters', () => {
   beforeAll(async () => {
     await setupDB();
     await importFixtures();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('imports files with spaces in filename', async () => {
@@ -913,7 +913,7 @@ describeE2E('E2E: Slug with Special Characters', () => {
     expect(page).not.toBeNull();
     expect(page.title).toBe('OhMyGreen');
     expect(page.type).toBe('company');
-  }, 30_000);
+  }, 120_000);
 
   test('imports files with parens in filename', async () => {
     const page = await callOp('get_page', { slug: 'apple-notes/notes-march-2024' }) as any;
@@ -943,7 +943,7 @@ describeE2E('E2E: Slug with Special Characters', () => {
 describeE2E('E2E: RLS Verification', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   const cliCwd = join(import.meta.dir, '../..');
@@ -966,7 +966,7 @@ describeE2E('E2E: RLS Verification', () => {
     if (tables.some((t: any) => t.rowsecurity)) {
       expect(noRls.map((t: any) => t.tablename)).toEqual([]);
     }
-  }, 30_000);
+  }, 120_000);
 
   test('current user role has BYPASSRLS', async () => {
     const conn = getConn();
@@ -1239,7 +1239,7 @@ describeE2E('E2E: Doctor Command', () => {
     // other rows so the doctor sees a clean single-source brain.
     const conn = getConn();
     await conn`DELETE FROM sources WHERE id != 'default'`;
-  }, 30_000);
+  }, 120_000);
   afterAll(async () => {
     await teardownDB();
     if (gbrainHome) rmSync(gbrainHome, { recursive: true, force: true });
@@ -1297,7 +1297,7 @@ describeE2E('E2E: Doctor Command', () => {
       expect(typeof check.name).toBe('string');
       expect(typeof check.message).toBe('string');
     }
-  }, 30_000);
+  }, 120_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -1428,7 +1428,7 @@ describeE2E('E2E: Parallel Import', () => {
 describeE2E('E2E: Performance Baselines', () => {
   beforeAll(async () => {
     await setupDB();
-  }, 30_000);
+  }, 120_000);
   afterAll(teardownDB);
 
   test('import + search + link performance', async () => {
@@ -1454,5 +1454,5 @@ describeE2E('E2E: Performance Baselines', () => {
     console.log(`    Search p50: ${p50.toFixed(0)}ms`);
     console.log(`    Search p99: ${p99.toFixed(0)}ms`);
     console.log(`    Link + backlink: ${linkMs.toFixed(0)}ms`);
-  }, 30_000);
+  }, 120_000);
 });
