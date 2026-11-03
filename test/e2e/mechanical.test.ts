@@ -731,12 +731,12 @@ describeE2E('E2E: Setup Journey', () => {
             '--embedding-model', 'openai:text-embedding-3-large'],
       cwd: cliCwd,
       env: cliEnv(),
-      timeout: 30_000,
+      timeout: 25_000,
     });
     const stdout = new TextDecoder().decode(result.stdout);
     expect(result.exitCode).toBe(0);
     expect(stdout).toContain('Brain ready');
-  }, 30_000);
+  }, 40_000);
 
   test('gbrain import imports fixtures via CLI', () => {
     const result = Bun.spawnSync({
@@ -1144,6 +1144,10 @@ describeE2E('E2E: RLS Verification', () => {
       const stderr = new TextDecoder().decode(result.stderr);
 
       // Must succeed — no 42P01, no transaction rollback.
+      if (result.exitCode !== 0) {
+        console.error('v24 init stdout:', stdout.slice(-4000));
+        console.error('v24 init stderr:', stderr.slice(-4000));
+      }
       expect(result.exitCode).toBe(0);
       expect(stderr + stdout).not.toMatch(/42P01|does not exist.*budget/i);
 
