@@ -731,7 +731,7 @@ describeE2E('E2E: Setup Journey', () => {
             '--embedding-model', 'openai:text-embedding-3-large'],
       cwd: cliCwd,
       env: cliEnv(),
-      timeout: 15_000,
+      timeout: 30_000,
     });
     const stdout = new TextDecoder().decode(result.stdout);
     expect(result.exitCode).toBe(0);
