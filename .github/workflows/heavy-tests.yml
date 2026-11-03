@@ -38,7 +38,7 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'heavy-tests')
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 30
     services:
       postgres:

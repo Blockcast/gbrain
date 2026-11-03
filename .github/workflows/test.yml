@@ -14,10 +14,10 @@ on:
   # heavy-tests.yml (08:17) so the three don't contend for runners.
   schedule:
     - cron: '47 8 * * *'  # 08:47 UTC daily — staggered off e2e + heavy-tests
-  # Manual dispatch lets a local dev/agent offload the suite to GitHub's
-  # on-demand runners from ANY branch (see scripts/ship-remote-tests.sh).
-  # Frees a load-saturated local machine (e.g. many Conductor agents running
-  # their own bun-test suites at once — load avg 120 on 16 cores).
+  # Manual dispatch lets a local dev/agent offload the suite to the on-prem
+  # ARC runners from ANY branch (see scripts/ship-remote-tests.sh). Frees a
+  # load-saturated local machine (e.g. many Conductor agents running their own
+  # bun-test suites at once — load avg 120 on 16 cores).
   workflow_dispatch:
 
 permissions:
@@ -46,7 +46,7 @@ jobs:
   # the deny-listed doc files.
   # ──────────────────────────────────────────────────────────────────────
   cache-check:
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 10
     outputs:
       hit: ${{ steps.lookup.outputs.cache-hit }}
@@ -101,7 +101,7 @@ jobs:
   gitleaks:
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -124,7 +124,7 @@ jobs:
     # the 20 checks via & + wait (~5s vs ~15-25s sequential).
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -145,7 +145,7 @@ jobs:
     # shard 1's overload).
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -170,7 +170,7 @@ jobs:
     # the matrix because it's light (~42s).
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -193,7 +193,7 @@ jobs:
     # dominate a shard's wallclock. Runs in parallel with the matrix.
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -229,7 +229,7 @@ jobs:
     # weights fall back to corpus median — new test files work immediately.
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -259,7 +259,7 @@ jobs:
   cache-write:
     needs: [cache-check, gitleaks, verify, serial-tests, slow-eval-longmemeval, slow-entity-resolve-perf, test]
     if: success() && needs.cache-check.outputs.hit != 'true'
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 5
     steps:
       - name: Create cache marker
@@ -282,7 +282,7 @@ jobs:
   test-status:
     needs: [cache-check, gitleaks, verify, serial-tests, slow-eval-longmemeval, slow-entity-resolve-perf, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 5
     steps:
       - name: Aggregate result

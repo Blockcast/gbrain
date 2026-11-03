@@ -22,7 +22,7 @@ concurrency:
 jobs:
   tier1:
     name: Tier 1 (Mechanical)
-    runs-on: ubuntu-latest
+    runs-on: arc-default
     timeout-minutes: 20
     services:
       postgres:
@@ -51,11 +51,14 @@ jobs:
 
   tier2:
     name: Tier 2 (LLM Skills)
-    runs-on: ubuntu-latest
-    # Runs on every push/PR now (promoted from schedule-only in v0.19.0).
+    # Secret-bearing tests are trusted-event only. A fork PR must never execute
+    # attacker-controlled code with provider credentials on a shared runner.
+    if: github.event_name != 'pull_request'
+    runs-on: arc-default
+    # Runs on pushes to master now (promoted from schedule-only in v0.19.0).
     # Tier 1 must pass first; Tier 2 uses OPENAI_API_KEY + ANTHROPIC_API_KEY
     # from repo/org secrets. Nightly + manual triggers still supported via
-    # the workflow-level `on:` list.
+    # the workflow-level `on:` list; pull requests skip this job.
     needs: tier1
     timeout-minutes: 30
     services:
