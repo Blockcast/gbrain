@@ -232,7 +232,9 @@ jobs:
     needs: cache-check
     if: needs.cache-check.outputs.hit != 'true'
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'default' }}
-    timeout-minutes: 25
+    # Shard 4's 94-file slice reaches the 25m cap on ARC after its tests pass;
+    # leave enough room for the final test process and runner cleanup.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
