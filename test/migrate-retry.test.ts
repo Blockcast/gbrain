@@ -175,6 +175,7 @@ describe('tryRunPendingMigrations', () => {
 
   test('honors custom pollIntervalMs (test seam allows tight intervals)', async () => {
     let pollCalls = 0;
+    let clockMs = 0;
     const result = await tryRunPendingMigrations(fakeEngine, {
       retryBackoffMs: 0,
       pollIntervalMs: 1,
@@ -182,6 +183,8 @@ describe('tryRunPendingMigrations', () => {
       _hooks: {
         hasPending: async () => { pollCalls++; return true; },
         initSchema: async () => { throw new FakeDeadlock(); },
+        now: () => clockMs,
+        sleep: async (ms: number) => { clockMs += ms; },
       },
     });
     expect(result.status).toBe('persistent');
