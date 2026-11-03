@@ -35,7 +35,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetPgliteState(engine);
-});
+}, 90_000);
 
 function makeEvent(overrides: Partial<IngestionEvent> = {}): IngestionEvent {
   const content = overrides.content ?? '# captured thought';
