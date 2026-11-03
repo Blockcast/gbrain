@@ -14,11 +14,17 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { runEvalTrajectory } from '../src/commands/eval-trajectory.ts';
 
 let engine: PGLiteEngine;
+let FACT_EMBED_DIM = 0;
 
 beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  const rows = await engine.executeRaw<{ atttypmod: number }>(
+    `SELECT atttypmod FROM pg_attribute
+       WHERE attrelid = 'facts'::regclass AND attname = 'embedding'`,
+  );
+  FACT_EMBED_DIM = rows[0]?.atttypmod ?? 1280;
 });
 
 afterAll(async () => {
@@ -30,8 +36,8 @@ beforeEach(async () => {
 });
 
 function unitVec(idx = 0): string {
-  const a = new Float32Array(1536);
-  a[idx % 1536] = 1.0;
+  const a = new Float32Array(FACT_EMBED_DIM);
+  a[idx % FACT_EMBED_DIM] = 1.0;
   return '[' + Array.from(a).join(',') + ']';
 }
 
