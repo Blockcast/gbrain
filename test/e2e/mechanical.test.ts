@@ -1138,7 +1138,10 @@ describeE2E('E2E: RLS Verification', () => {
       // this would error out with 42P01 and leave version at 23.
       const result = Bun.spawnSync({
         cmd: ['bun', 'run', 'src/cli.ts', 'init', '--non-interactive', '--url', process.env.DATABASE_URL!],
-        cwd: cliCwd, env: cliEnv(), timeout: 120_000,
+        // ARC's contended migration path can exceed two minutes; keep the
+        // child deadline below the enclosing test deadline so it reports its
+        // own exit status instead of being killed by Bun first.
+        cwd: cliCwd, env: cliEnv(), timeout: 180_000,
       });
       const stdout = new TextDecoder().decode(result.stdout);
       const stderr = new TextDecoder().decode(result.stderr);
@@ -1212,7 +1215,7 @@ describeE2E('E2E: RLS Verification', () => {
         );
       }
     }
-  }, 150_000);
+  }, 210_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
