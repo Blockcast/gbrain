@@ -86,8 +86,11 @@ jobs:
         # up to 3 attempts ride out a flaky registry. Step cap is a backstop.
         timeout-minutes: 8
         run: |
+          prefix="$RUNNER_TEMP/openclaw"
+          mkdir -p "$prefix/lib" "$prefix/bin"
+          echo "$prefix/bin" >> "$GITHUB_PATH"
           for attempt in 1 2 3; do
-            if timeout 120 npm install -g openclaw@2026.4.9; then
+            if timeout 120 npm install --global --prefix "$prefix" openclaw@2026.4.9; then
               exit 0
             fi
             echo "::warning::openclaw install attempt $attempt failed or timed out; retrying in 10s" >&2
