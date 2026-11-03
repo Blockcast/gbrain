@@ -31,7 +31,10 @@ function withHome(fn: (home: string) => void) {
 describe('T5 — gbrain search dispatch', () => {
   test('`search modes --json` routes to the dashboard (active_mode), not a query', () => {
     withHome((home) => {
-      const { stdout, status } = run(['search', 'modes', '--json'], home);
+      // Fresh PGLite schema setup can exceed the production 10s read-only
+      // deadline on ARC; this test targets dispatch shape, so give it a
+      // bounded runner-local budget without changing the default behavior.
+      const { stdout, status } = run(['search', 'modes', '--json', '--timeout=30s'], home);
       expect(status).toBe(0);
       expect(stdout).toContain('active_mode');
       // It must NOT be a search-results payload for the literal word "modes".

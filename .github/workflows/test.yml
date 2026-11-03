@@ -137,6 +137,8 @@ jobs:
           key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
       - run: bun install
       - run: bun run verify
+        env:
+          GBRAIN_VERIFY_TIMEOUT: 300
 
   serial-tests:
     # *.serial.test.ts at --max-concurrency=1. Lives in its own runner so
