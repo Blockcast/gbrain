@@ -22,7 +22,10 @@ concurrency:
 jobs:
   tier1:
     name: Tier 1 (Mechanical)
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'default' }}
+    # Fork PRs are skipped rather than running untrusted code on ARC or a
+    # GitHub-hosted fallback. Same-repository PRs and trusted events use ARC.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: default
     timeout-minutes: 20
     services:
       postgres:
@@ -51,7 +54,8 @@ jobs:
 
   tier2:
     name: Tier 2 (LLM Skills)
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'default' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: default
     # Runs on every push/PR now (promoted from schedule-only in v0.19.0).
     # Tier 1 must pass first; Tier 2 uses OPENAI_API_KEY + ANTHROPIC_API_KEY
     # from repo/org secrets. Nightly + manual triggers still supported via
@@ -120,8 +124,8 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gbrain_test
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # v0.33.3.0: ZE live API tests skip gracefully when this is unset,
-          # so forks without the secret stay green. The test exercises the
-          # zeroEntropyCompatFetch response-rewriter + URL rewrite + flexible
-          # dim handling + gateway.rerank against the real provider.
+          # v0.33.3.0: ZE live API tests skip gracefully when this is unset.
+          # The test exercises the zeroEntropyCompatFetch response-rewriter +
+          # URL rewrite + flexible dim handling + gateway.rerank against the
+          # real provider.
           ZEROENTROPY_API_KEY: ${{ secrets.ZEROENTROPY_API_KEY }}
