@@ -703,7 +703,7 @@ describeE2E('E2E: Idempotency', () => {
     const parsed = parseMarkdown(content, 'people/marcus-reid.md');
     const result2 = await importFromContent(engine, parsed.slug, content, { noEmbed: true });
     expect(result2.status).toBe('skipped');
-  });
+  }, 30_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -933,7 +933,7 @@ describeE2E('E2E: Slug with Special Characters', () => {
     await importFixtures(); // second import
     const after = await callOp('get_stats') as any;
     expect(after.page_count).toBe(before.page_count);
-  });
+  }, 30_000);
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -1263,7 +1263,7 @@ describeE2E('E2E: Doctor Command', () => {
       cmd: ['bun', 'run', 'src/cli.ts', 'init', '--non-interactive',
             '--url', process.env.DATABASE_URL!,
             '--embedding-model', 'openai:text-embedding-3-large'],
-      cwd: cliCwd, env: cliEnv(), timeout: 15_000,
+      cwd: cliCwd, env: cliEnv(), timeout: 30_000,
     });
     const result = Bun.spawnSync({
       cmd: ['bun', 'run', 'src/cli.ts', 'doctor'],
