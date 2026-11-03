@@ -110,6 +110,7 @@ fi
 # whitespace correctly without word-splitting on spaces in paths.
 # Keep the shard marker consistent with the local parallel runner. Some tests
 # use it to distinguish a contention-heavy CI shard from a solo local run.
-# PGLite resets can take over a minute on a contended ARC shard, so this
-# process-wide cap must be at least as long as the slowest hook timeout.
-printf '%s\n' "$SHARD_FILES" | env SHARD="$SHARD_INDEX/$TOTAL_SHARDS" xargs bun test --timeout=120000
+# PGLite is in-process WASM; the default 20 concurrent test files can leave
+# several engines fighting for CPU on ARC and starve reset hooks. Match the
+# local runner's proven cap while retaining the 120s hook/test budget.
+printf '%s\n' "$SHARD_FILES" | env SHARD="$SHARD_INDEX/$TOTAL_SHARDS" xargs bun test --max-concurrency=4 --timeout=120000
