@@ -19,9 +19,9 @@ import type { MinionJobContext } from '../../src/core/minions/types.ts';
 
 let engine: PGLiteEngine;
 
-// 30s hook timeout — when this file runs deep in a shard process that's
-// already created ~20 PGLite engines, the WASM cold-start + 95 migrations
-// on a fresh DB legitimately exceeds bun's 5s hook default. CI shard 4
+// The per-test reset gets 120s — when this file runs deep in a shard process
+// that's already created ~20 PGLite engines, the WASM cold-start + 95
+// migrations on a fresh DB can exceed bun's default hook timeout. CI shard 4
 // hit this on v0.41.17.0 (95 migrations × 21 files × 1 bun process).
 beforeAll(async () => {
   engine = new PGLiteEngine();
@@ -35,7 +35,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetPgliteState(engine);
-});
+}, 120_000);
 
 function makeEvent(overrides: Partial<IngestionEvent> = {}): IngestionEvent {
   const content = overrides.content ?? '# captured thought';

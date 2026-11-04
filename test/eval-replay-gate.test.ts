@@ -26,6 +26,7 @@ import { join } from 'path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { readContentChunksEmbeddingDim } from '../src/core/embedding-dim-check.ts';
 import type { ChunkInput } from '../src/core/types.ts';
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,17 @@ import type { ChunkInput } from '../src/core/types.ts';
 // ---------------------------------------------------------------------------
 
 let engine: PGLiteEngine;
+let embeddingDim = 0;
 
 beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  const probe = await readContentChunksEmbeddingDim(engine);
+  if (!probe.exists || probe.dims === null) {
+    throw new Error('content_chunks.embedding column missing after initSchema — test environment broken');
+  }
+  embeddingDim = probe.dims;
 });
 
 afterAll(async () => {
@@ -73,7 +80,7 @@ function loadFixture(): QrelFixture {
 }
 
 /** Basis vector with 1.0 at `idx` and 0.0 elsewhere. Mirrors search-quality.test.ts. */
-function basisEmbedding(idx: number, dim = 1536): Float32Array {
+function basisEmbedding(idx: number, dim = embeddingDim): Float32Array {
   const emb = new Float32Array(dim);
   emb[idx % dim] = 1.0;
   return emb;

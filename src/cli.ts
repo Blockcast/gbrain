@@ -245,7 +245,7 @@ async function main() {
     const label = 'gbrain search';
     // diagnose runs real retrieval (keyword + vector + hybrid) so it gets a
     // longer deadline than the read-only dashboard.
-    const timeoutMs = isDiagnose ? 60_000 : 10_000;
+    const timeoutMs = getCliOptions().timeoutMs ?? (isDiagnose ? 60_000 : 10_000);
     let engine: BrainEngine;
     try {
       engine = await withTimeout(connectEngine(), timeoutMs, `${label}: connect`);

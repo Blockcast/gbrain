@@ -33,7 +33,7 @@ let engine: PGLiteEngine;
 const PAGES = 5_000;
 const LINKS = 50_000;
 const CHUNKS = 25_000;
-const RUNS = 5; // median of 5 runs per shape
+const RUNS = 9; // median of 9 runs per shape; smooths noisy shared runners
 
 beforeAll(async () => {
   engine = new PGLiteEngine();

@@ -22,7 +22,10 @@ concurrency:
 jobs:
   tier1:
     name: Tier 1 (Mechanical)
-    runs-on: ubuntu-latest
+    # Fork PRs are skipped rather than running untrusted code on ARC or a
+    # GitHub-hosted fallback. Same-repository PRs and trusted events use ARC.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: default
     timeout-minutes: 20
     services:
       postgres:
@@ -51,7 +54,8 @@ jobs:
 
   tier2:
     name: Tier 2 (LLM Skills)
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: default
     # Runs on every push/PR now (promoted from schedule-only in v0.19.0).
     # Tier 1 must pass first; Tier 2 uses OPENAI_API_KEY + ANTHROPIC_API_KEY
     # from repo/org secrets. Nightly + manual triggers still supported via
@@ -81,13 +85,16 @@ jobs:
       - name: Install OpenClaw
         # Bound + retry the install: a transient npm/registry stall here used to
         # hang unbounded and (since the v0.42.50.0 job timeout) burn the entire
-        # 30m Tier 2 budget before failing — even though the install normally
-        # finishes in well under a minute. `timeout` kills a hung attempt fast;
-        # up to 3 attempts ride out a flaky registry. Step cap is a backstop.
-        timeout-minutes: 8
+        # 30m Tier 2 budget before failing. ARC's cold npm install can take a
+        # few minutes, so `timeout` bounds each attempt; up to 3 attempts ride
+        # out a slow or flaky registry. Step cap is a backstop.
+        timeout-minutes: 16
         run: |
+          prefix="$RUNNER_TEMP/openclaw"
+          mkdir -p "$prefix/lib" "$prefix/bin"
+          echo "$prefix/bin" >> "$GITHUB_PATH"
           for attempt in 1 2 3; do
-            if timeout 120 npm install -g openclaw@2026.4.9; then
+            if timeout 300 npm install --global --prefix "$prefix" --prefer-offline --no-audit --no-fund openclaw@2026.4.9; then
               exit 0
             fi
             echo "::warning::openclaw install attempt $attempt failed or timed out; retrying in 10s" >&2
@@ -117,8 +124,8 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gbrain_test
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # v0.33.3.0: ZE live API tests skip gracefully when this is unset,
-          # so forks without the secret stay green. The test exercises the
-          # zeroEntropyCompatFetch response-rewriter + URL rewrite + flexible
-          # dim handling + gateway.rerank against the real provider.
+          # v0.33.3.0: ZE live API tests skip gracefully when this is unset.
+          # The test exercises the zeroEntropyCompatFetch response-rewriter +
+          # URL rewrite + flexible dim handling + gateway.rerank against the
+          # real provider.
           ZEROENTROPY_API_KEY: ${{ secrets.ZEROENTROPY_API_KEY }}

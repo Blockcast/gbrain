@@ -31,30 +31,33 @@ function withHome(fn: (home: string) => void) {
 describe('T5 — gbrain search dispatch', () => {
   test('`search modes --json` routes to the dashboard (active_mode), not a query', () => {
     withHome((home) => {
-      const { stdout, status } = run(['search', 'modes', '--json'], home);
+      // Fresh PGLite schema setup can exceed the production 10s read-only
+      // deadline on ARC; this test targets dispatch shape, so give it a
+      // bounded runner-local budget without changing the default behavior.
+      const { stdout, status } = run(['search', 'modes', '--json', '--timeout=30s'], home);
       expect(status).toBe(0);
       expect(stdout).toContain('active_mode');
       // It must NOT be a search-results payload for the literal word "modes".
       expect(stdout).not.toContain('Unknown subcommand');
     });
-  });
+  }, 30_000);
 
   test('`search "<freetext>"` routes to the cheap-hybrid search op (no "Unknown subcommand")', () => {
     withHome((home) => {
-      const { stdout, stderr, status } = run(['search', 'zzz-no-such-page-xyz'], home);
+      const { stdout, stderr, status } = run(['search', 'zzz-no-such-page-xyz', '--timeout=30s'], home);
       // Empty brain → "No results." (the search op's formatter), exit 0.
       expect(status).toBe(0);
       expect(stderr).not.toContain('Unknown subcommand');
       expect(stdout.toLowerCase()).toContain('no results');
     });
-  });
+  }, 30_000);
 
   test('`search stats --json` routes to the dashboard', () => {
     withHome((home) => {
-      const { stdout, status } = run(['search', 'stats', '--json'], home);
+      const { stdout, status } = run(['search', 'stats', '--json', '--timeout=30s'], home);
       expect(status).toBe(0);
       // stats envelope, not a search-results array.
       expect(stdout).toMatch(/total_calls|cache_hit_rate|window_days/);
     });
-  });
+  }, 30_000);
 });
