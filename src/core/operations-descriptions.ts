@@ -123,14 +123,20 @@ export const FIND_TRAJECTORY_DESCRIPTION =
 // symbol that genuinely does not exist. An agent that greps and finds nothing
 // looks again; an agent handed a clean `count: 0` stops.
 export const CODE_INDEX_FRESHNESS_CLAUSE =
-  "Every response carries `index_freshness: {oldest_indexed_at, source_count, " +
-  "never_synced_count, basis}` — `oldest_indexed_at` is an ISO timestamp (the " +
-  "STALEST source behind the answer), `basis` is 'contributing' when it dates the " +
-  "rows returned, 'scope' when the result was empty and it dates what was searched, " +
-  "'unavailable' when the probe failed. It is present on EMPTY results too: check it " +
-  "before trusting a `count: 0`, and re-check against the real tree if the index " +
-  "predates the code you are asking about. `never_synced_count > 0` means some source " +
-  "has no recorded sync at all, so the true age is unbounded.";
+  "Every response carries `index_freshness: {oldest_content_at, " +
+  "content_undatable_count, oldest_commit_sync_at, never_synced_count, " +
+  "source_count, basis}`. `oldest_content_at` is an ISO timestamp: the commit " +
+  "time of the NEWEST CODE INDEXED, taken from the STALEST source behind the " +
+  "answer — compare it against the tree's real HEAD to judge whether the index " +
+  "is behind. `basis` is 'contributing' when the figures date the rows returned, " +
+  "'scope' when the result was empty and they date what was searched, " +
+  "'unavailable' when the probe failed. It is present on EMPTY results too: check " +
+  "it before trusting a `count: 0`, and re-check against the real tree if the " +
+  "index predates the code you are asking about. `content_undatable_count > 0` " +
+  "means some source cannot be dated at all, so the true age is unbounded. " +
+  "`oldest_commit_sync_at` is when a sync last INGESTED A NEW COMMIT, NOT when it " +
+  "last checked — an old value is normal on a quiet repo and is not by itself " +
+  "evidence of a stale index.";
 
 export const CODE_CALLERS_DESCRIPTION =
   "BEFORE editing any function, run code_callers with the symbol name to find " +

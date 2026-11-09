@@ -28,7 +28,7 @@ beforeEach(async () => {
   await engine.executeRaw('DELETE FROM content_chunks');
   await engine.executeRaw('DELETE FROM pages');
   await engine.executeRaw(`DELETE FROM sources WHERE id <> 'default'`);
-  await engine.executeRaw(`UPDATE sources SET last_sync_at = NULL WHERE id = 'default'`);
+  await engine.executeRaw(`UPDATE sources SET last_sync_at = NULL, newest_content_at = NULL WHERE id = 'default'`);
 });
 
 const SAMPLE = `export function alpha(x: number): number {
@@ -39,10 +39,18 @@ const SAMPLE = `export function alpha(x: number): number {
 const FRESH = '2026-11-01T00:00:00.000Z';
 const STALE = '2026-06-24T00:00:00.000Z';
 
-async function addSource(id: string, lastSyncAt: string | null): Promise<void> {
+async function addSource(
+  id: string,
+  lastSyncAt: string | null,
+  // A commit-advancing sync writes both columns in one UPDATE, so defaulting
+  // the content clock to the ingest instant models the normal case. Pass it
+  // explicitly to model a quiet repo (content older than ingest) or a
+  // pre-v0.41.32.0 row (content NULL).
+  newestContentAt: string | null = lastSyncAt,
+): Promise<void> {
   await engine.executeRaw(
-    `INSERT INTO sources (id, name, last_sync_at) VALUES ($1, $2, $3)`,
-    [id, id, lastSyncAt],
+    `INSERT INTO sources (id, name, last_sync_at, newest_content_at) VALUES ($1, $2, $3, $4)`,
+    [id, id, lastSyncAt, newestContentAt],
   );
 }
 
@@ -62,7 +70,7 @@ describe('resolveCodeIndexFreshness — contributing basis', () => {
       contributingSourceIds: ['fresh-src', 'stale-src'],
     });
     expect(f.basis).toBe('contributing');
-    expect(f.oldest_indexed_at).toBe(STALE);
+    expect(f.oldest_content_at).toBe(STALE);
     expect(f.source_count).toBe(2);
   });
 
@@ -73,7 +81,7 @@ describe('resolveCodeIndexFreshness — contributing basis', () => {
     });
     expect(f.source_count).toBe(2);
     expect(f.never_synced_count).toBe(1);
-    expect(f.oldest_indexed_at).toBe(FRESH);
+    expect(f.oldest_content_at).toBe(FRESH);
   });
 });
 
@@ -86,7 +94,7 @@ describe('resolveCodeIndexFreshness — scope basis (the zero-result path)', () 
 
     const f = await resolveCodeIndexFreshness(engine, { contributingSourceIds: [] });
     expect(f.basis).toBe('scope');
-    expect(f.oldest_indexed_at).toBe(STALE);
+    expect(f.oldest_content_at).toBe(STALE);
     expect(f.source_count).toBe(2);
   });
 
@@ -99,7 +107,7 @@ describe('resolveCodeIndexFreshness — scope basis (the zero-result path)', () 
     const f = await resolveCodeIndexFreshness(engine, { contributingSourceIds: [] });
     expect(f.source_count).toBe(1);
     expect(f.never_synced_count).toBe(0);
-    expect(f.oldest_indexed_at).toBe(FRESH);
+    expect(f.oldest_content_at).toBe(FRESH);
   });
 
   test('scoped sourceId reports that source alone', async () => {
@@ -111,7 +119,7 @@ describe('resolveCodeIndexFreshness — scope basis (the zero-result path)', () 
     const f = await resolveCodeIndexFreshness(engine, { sourceId: 'fresh-code' });
     expect(f.basis).toBe('scope');
     expect(f.source_count).toBe(1);
-    expect(f.oldest_indexed_at).toBe(FRESH);
+    expect(f.oldest_content_at).toBe(FRESH);
   });
 
   test('allSources overrides a scoped sourceId and goes brain-wide', async () => {
@@ -123,7 +131,7 @@ describe('resolveCodeIndexFreshness — scope basis (the zero-result path)', () 
     const f = await resolveCodeIndexFreshness(engine, {
       sourceId: 'fresh-code', allSources: true,
     });
-    expect(f.oldest_indexed_at).toBe(STALE);
+    expect(f.oldest_content_at).toBe(STALE);
     expect(f.source_count).toBe(2);
   });
 
@@ -131,7 +139,7 @@ describe('resolveCodeIndexFreshness — scope basis (the zero-result path)', () 
     const f = await resolveCodeIndexFreshness(engine, { sourceId: 'no-such-source' });
     expect(f.basis).toBe('scope');
     expect(f.source_count).toBe(0);
-    expect(f.oldest_indexed_at).toBeNull();
+    expect(f.oldest_content_at).toBeNull();
   });
 });
 
@@ -152,7 +160,7 @@ describe('code_def envelope carries index age on BOTH paths', () => {
       contributingSourceIds: defs.map((d) => d.source_id),
     });
     expect(f.basis).toBe('contributing');
-    expect(f.oldest_indexed_at).toBe(STALE);
+    expect(f.oldest_content_at).toBe(STALE);
   });
 
   test('MISS: a symbol that does not exist still reports how stale the search was', async () => {
@@ -165,7 +173,63 @@ describe('code_def envelope carries index age on BOTH paths', () => {
       contributingSourceIds: defs.map((d) => d.source_id),
     });
     expect(f.basis).toBe('scope');
-    expect(f.oldest_indexed_at).toBe(STALE);
+    expect(f.oldest_content_at).toBe(STALE);
     expect(f.source_count).toBe(1);
+  });
+});
+
+describe('resolveCodeIndexFreshness — the two clocks are independent', () => {
+  test('a QUIET repo dates its content older than its last ingest, and both are reported', async () => {
+    // Synced minutes ago; no new commits for months. `last_sync_at` only moves
+    // on a commit advance, so the ingest clock reads months old too — which is
+    // exactly why the envelope must not call it "last synced". The content
+    // clock is the honest figure for "how old is the code I hold".
+    await addSource('quiet-src', STALE, STALE);
+    await addCodeOn('quiet-src', 'quiet/alpha.ts');
+    const defs = await findCodeDef(engine, 'alpha', {});
+    const f = await resolveCodeIndexFreshness(engine, {
+      contributingSourceIds: defs.map((d) => d.source_id),
+    });
+    expect(f.basis).toBe('contributing');
+    expect(f.oldest_content_at).toBe(STALE);
+    expect(f.oldest_commit_sync_at).toBe(STALE);
+    expect(f.content_undatable_count).toBe(0);
+  });
+
+  test('a row that has never had a commit-advancing sync since v0.41.32.0 is content-undatable but still ingest-datable', async () => {
+    await addSource('legacy-src', FRESH, null);
+    await addCodeOn('legacy-src', 'legacy/alpha.ts');
+    const defs = await findCodeDef(engine, 'alpha', {});
+    const f = await resolveCodeIndexFreshness(engine, {
+      contributingSourceIds: defs.map((d) => d.source_id),
+    });
+    expect(f.oldest_content_at).toBeNull();
+    expect(f.content_undatable_count).toBe(1);
+    // Degraded, not dark: the ingest clock still answers.
+    expect(f.oldest_commit_sync_at).toBe(FRESH);
+    expect(f.never_synced_count).toBe(0);
+  });
+});
+
+describe('resolveCodeIndexFreshness — pre-v109 brain (no newest_content_at column)', () => {
+  test('degrades to the ingest clock instead of failing the whole probe', async () => {
+    await addSource('old-brain-src', STALE);
+    await addCodeOn('old-brain-src', 'oldbrain/alpha.ts');
+    const defs = await findCodeDef(engine, 'alpha', {});
+    const contributingSourceIds = defs.map((d) => d.source_id);
+
+    await engine.executeRaw('ALTER TABLE sources DROP COLUMN newest_content_at');
+    try {
+      const f = await resolveCodeIndexFreshness(engine, { contributingSourceIds });
+      // The forward-reference guard must not let a missing column take the
+      // envelope down to `unavailable` — losing the content clock is
+      // survivable, losing the signal is the defect this module exists to fix.
+      expect(f.basis).toBe('contributing');
+      expect(f.oldest_commit_sync_at).toBe(STALE);
+      expect(f.oldest_content_at).toBeNull();
+      expect(f.content_undatable_count).toBe(1);
+    } finally {
+      await engine.executeRaw('ALTER TABLE sources ADD COLUMN newest_content_at TIMESTAMPTZ');
+    }
   });
 });
