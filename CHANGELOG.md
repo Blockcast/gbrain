@@ -2,6 +2,26 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.52.0] - 2026-11-09
+
+**Every `code_*` response now carries the date of the index it answered from — including, and especially, when it answers nothing.** `code_def`, `code_refs`, `code_callers`, `code_callees`, `code_blast` and `code_flow` previously returned `{count: 0, status: "ready"}` identically whether a symbol does not exist or the index simply predates it, and nothing on the envelope let a caller tell those apart.
+
+`status`/`ready` (added for the #1780 readiness gap) report whether the symbol graph is BUILT. That is computed from "do code chunks exist in scope", which is equally true of a snapshot taken an hour ago and one taken five months ago. So on a brain whose sync has been failing — an expired embedding key, a dead credential, a cron that stopped — every `code_*` call keeps answering `status: "ready"` off a frozen snapshot, and the one field a caller would check to validate the instrument affirms it.
+
+The empty result is the expensive case, not the stale one. An agent that greps and finds nothing goes and looks again; an agent handed a clean, well-formed `count: 0` stops. Readiness and age are orthogonal questions and a caller needs both.
+
+### Added
+- **`index_freshness` on all six `code_*` envelopes** — `{oldest_indexed_at, source_count, never_synced_count, basis}`. Present on empty results too, which is the whole point: `basis: "contributing"` dates the rows you were handed, `basis: "scope"` dates the sources that were searched when nothing came back. The tool descriptions carry the field and say to check it before trusting a zero, so an agent learns the signal exists without a first call to discover it.
+- **`oldest_indexed_at` is an ISO-8601 timestamp, never a pre-computed age.** An age is correct only at the instant it is serialized; cached or relayed, it freezes silently while continuing to look like a live number. A timestamp stays honest against the reader's own clock however long the envelope lives. For the same reason `code_blast`/`code_flow` resolve freshness OUTSIDE the traversal cache — a stamp baked into a cached walk is exactly the frozen age this field exists to prevent.
+- **Per-result `source_id` on `code_def` / `code_refs` rows.** A multi-source answer is only as trustworthy as its stalest contributor, which a caller cannot judge without knowing which sources are in it.
+- **`never_synced_count`** surfaces sources with no recorded sync. SQL `MIN()` drops NULLs, so a scope holding a never-synced source would otherwise report the oldest *known* timestamp and hide the unbounded one behind it — the same clean-confident-answer-over-missing-data shape the field exists to remove.
+
+### Changed
+- **A mixed-source answer reports its OLDEST contributor, not its newest.** Reporting the newest would make such an answer look fresher than any row actually in it.
+- **A failed freshness probe is distinguishable from a fresh brain.** `basis: "unavailable"` is reported rather than a null timestamp alone, which would render byte-identically to "nothing is stale". The probe is fail-open and never breaks the command it annotates.
+
+No staleness threshold is baked into the response. The raw timestamp is reported and the caller judges it: a threshold shipped inside a tool response is a policy every brain inherits and no caller can correct, and "too old" is not a property gbrain can know for someone else's codebase.
+
 ## [0.42.51.2] - 2026-09-17
 
 **A server starting up during a Postgres restart now actually outlasts it, liveness no longer kills a healthy process because the database is down, and a container that does give up says why.** v0.42.51.1 fixed the *classification* of `ECONNREFUSED` so connect retry would fire at all; this fixes the two things that still made it insufficient in production — the budget was far too short, and the probe wiring restarted the wrong thing.

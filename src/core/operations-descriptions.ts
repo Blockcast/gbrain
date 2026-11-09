@@ -117,6 +117,21 @@ export const FIND_TRAJECTORY_DESCRIPTION =
 // shape. Pin via test/operations-descriptions.test.ts.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Shared across all six code-* surfaces. The index-age clause is load-bearing
+// on the EMPTY path specifically: `count: 0` from an index that predates the
+// code is a MISS, and without a date on the envelope it is byte-identical to a
+// symbol that genuinely does not exist. An agent that greps and finds nothing
+// looks again; an agent handed a clean `count: 0` stops.
+export const CODE_INDEX_FRESHNESS_CLAUSE =
+  "Every response carries `index_freshness: {oldest_indexed_at, source_count, " +
+  "never_synced_count, basis}` — `oldest_indexed_at` is an ISO timestamp (the " +
+  "STALEST source behind the answer), `basis` is 'contributing' when it dates the " +
+  "rows returned, 'scope' when the result was empty and it dates what was searched, " +
+  "'unavailable' when the probe failed. It is present on EMPTY results too: check it " +
+  "before trusting a `count: 0`, and re-check against the real tree if the index " +
+  "predates the code you are asking about. `never_synced_count > 0` means some source " +
+  "has no recorded sync at all, so the true age is unbounded.";
+
 export const CODE_CALLERS_DESCRIPTION =
   "BEFORE editing any function, run code_callers with the symbol name to find " +
   "every caller (the people who'd be affected by your change). Returns direct " +
@@ -125,14 +140,16 @@ export const CODE_CALLERS_DESCRIPTION =
   "or all_sources=true. " +
   "Returns: `{symbol, count, callers: [{from_symbol_qualified, to_symbol_qualified, edge_type, resolved}]}`. " +
   "Example: `{symbol:'parseMarkdown', count:4, callers:[{from_symbol_qualified:'callerInA', " +
-  "to_symbol_qualified:'parseMarkdown', edge_type:'calls', resolved:true}]}`.";
+  "to_symbol_qualified:'parseMarkdown', edge_type:'calls', resolved:true}]}`. " +
+  CODE_INDEX_FRESHNESS_CLAUSE;
 
 export const CODE_CALLEES_DESCRIPTION =
   "When tracing how a function flows to its dependencies (DB calls, HTTP calls, " +
   "file I/O), run code_callees from the entry point. Forward view of the call " +
   "graph: what does this symbol call? Use this when debugging unexpected behavior " +
   "or when planning to extract / inline a function. Same shape as code_callers " +
-  "but the field is `callees` and the edge direction is reversed.";
+  "but the field is `callees` and the edge direction is reversed. " +
+  CODE_INDEX_FRESHNESS_CLAUSE;
 
 export const CODE_DEF_DESCRIPTION =
   "Where is this symbol defined? Returns one row per definition site (function, " +
@@ -141,7 +158,8 @@ export const CODE_DEF_DESCRIPTION =
   "case; multiple results indicate same-name symbols across files (which is information " +
   "in itself). " +
   "Returns: `{symbol, count, defs: [{slug, file, language, symbol_type, start_line, end_line, snippet}]}`. " +
-  "Filter by --lang to scope a polyglot brain (e.g., lang='typescript').";
+  "Filter by --lang to scope a polyglot brain (e.g., lang='typescript'). " +
+  CODE_INDEX_FRESHNESS_CLAUSE;
 
 export const CODE_REFS_DESCRIPTION =
   "Find every reference to a symbol across the codebase (every file, every line). " +
@@ -149,7 +167,8 @@ export const CODE_REFS_DESCRIPTION =
   "strings, imports, type annotations — not just call sites; (2) returns line " +
   "numbers, not symbol-qualified edges. Use this when planning a rename or " +
   "deprecation where you need to touch every literal mention. " +
-  "Returns: `{symbol, count, refs: [{slug, file, language, line, context}]}`.";
+  "Returns: `{symbol, count, refs: [{slug, file, language, line, context}]}`. " +
+  CODE_INDEX_FRESHNESS_CLAUSE;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PR1 — skill catalog over MCP (list_skills / get_skill). The agent repo's
