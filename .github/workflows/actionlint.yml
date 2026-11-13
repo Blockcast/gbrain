@@ -29,7 +29,7 @@ jobs:
     # Fork PRs are intentionally skipped; maintainers can rerun from a branch
     # in this repository after the code has been reviewed.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: default
+    runs-on: ubuntu-latest  # BLO-56666: PR-triggered; public repo leaves org group 1
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
