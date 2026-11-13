@@ -25,7 +25,7 @@ jobs:
     # Fork PRs are skipped rather than running untrusted code on ARC or a
     # GitHub-hosted fallback. Same-repository PRs and trusted events use ARC.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: default
+    runs-on: ubuntu-latest  # BLO-56666: PR-triggered; public repo leaves org group 1
     timeout-minutes: 20
     services:
       postgres:
@@ -55,7 +55,7 @@ jobs:
   tier2:
     name: Tier 2 (LLM Skills)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: default
+    runs-on: ubuntu-latest  # BLO-56666: PR-triggered; public repo leaves org group 1
     # Runs on every push/PR now (promoted from schedule-only in v0.19.0).
     # Tier 1 must pass first; Tier 2 uses OPENAI_API_KEY + ANTHROPIC_API_KEY
     # from repo/org secrets. Nightly + manual triggers still supported via
