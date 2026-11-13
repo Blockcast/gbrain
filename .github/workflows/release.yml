@@ -19,9 +19,10 @@ jobs:
           - os: linux
             target: bun-linux-x64
             artifact: gbrain-linux-x64
-    # Bun cross-compiles the Darwin artifact from the on-prem Linux ARC pool;
-    # never add a GitHub-hosted macOS fallback here.
-    runs-on: default
+    # Bun cross-compiles the Darwin artifact from Linux; never add a
+    # GitHub-hosted macOS fallback here. Hosted Linux, not ARC: a tag-ref run
+    # cannot match a public-repo-ci branch pin (BLO-56666 / BLO-55993).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
@@ -37,7 +38,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ${{ 'default' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
