@@ -16,6 +16,7 @@
 import type { BrainEngine } from '../core/engine.ts';
 import { errorFor, serializeError } from '../core/errors.ts';
 import { resolveCodeReadiness, readinessHint } from '../core/code-graph-readiness.ts';
+import { resolveCodeIndexFreshness, freshnessHint } from '../core/code-index-freshness.ts';
 
 export interface CodeDefResult {
   slug: string;
@@ -25,6 +26,12 @@ export interface CodeDefResult {
   start_line: number | null;
   end_line: number | null;
   snippet: string;
+  /**
+   * Which source this definition came from. Per-result attribution: a
+   * multi-source answer is only as fresh as its stalest contributor, and the
+   * caller cannot see that without knowing which sources are in the answer.
+   */
+  source_id: string | null;
 }
 
 export async function findCodeDef(
@@ -52,10 +59,10 @@ export async function findCodeDef(
   const rows = await engine.executeRaw<{
     slug: string; file: string | null; language: string | null;
     symbol_type: string | null; start_line: number | null; end_line: number | null;
-    chunk_text: string;
+    chunk_text: string; source_id: string | null;
   }>(
     `SELECT p.slug, (p.frontmatter->>'file') AS file, cc.language, cc.symbol_type,
-            cc.start_line, cc.end_line, cc.chunk_text
+            cc.start_line, cc.end_line, cc.chunk_text, p.source_id
      FROM content_chunks cc
      JOIN pages p ON p.id = cc.page_id
      WHERE cc.symbol_name = $1
@@ -81,6 +88,7 @@ export async function findCodeDef(
     end_line: r.end_line,
     // First 500 chars of chunk — enough for a preview without flooding output.
     snippet: r.chunk_text.slice(0, 500),
+    source_id: r.source_id,
   }));
 }
 
@@ -121,12 +129,19 @@ export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<v
     const results = await findCodeDef(engine, sym, { limit, language });
     // code-def is brain-wide (not source-scoped); readiness is 'symbol' grain.
     const readiness = await resolveCodeReadiness(engine, { kind: 'symbol', count: results.length });
+    // Index AGE is orthogonal to graph READINESS: `ready` says the graph is
+    // built, never how old the code behind it is. Attribute to the sources
+    // that produced these rows; on a miss, fall back to the scope searched.
+    const freshness = await resolveCodeIndexFreshness(engine, {
+      contributingSourceIds: results.map((r) => r.source_id),
+    });
     if (shouldEmitJson(args)) {
       console.log(JSON.stringify({
         symbol: sym,
         count: results.length,
         status: readiness.status,
         ready: readiness.ready,
+        index_freshness: freshness,
         results,
       }, null, 2));
     } else {
@@ -141,6 +156,10 @@ export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<v
           console.log(`  ${r.file || r.slug}${loc}  (${r.symbol_type})`);
         }
       }
+      // Printed on BOTH paths: an empty result is exactly where index age
+      // decides whether the answer means "absent" or "not indexed yet".
+      const fhint = freshnessHint(freshness);
+      if (fhint) console.log(fhint);
     }
   } catch (e: unknown) {
     const env = serializeError(e);

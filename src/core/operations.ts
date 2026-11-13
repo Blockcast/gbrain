@@ -42,6 +42,7 @@ import {
   CODE_CALLERS_DESCRIPTION,
   CODE_CALLEES_DESCRIPTION,
   CODE_DEF_DESCRIPTION,
+  CODE_INDEX_FRESHNESS_CLAUSE,
   CODE_REFS_DESCRIPTION,
   LIST_SKILLS_DESCRIPTION,
   GET_SKILL_DESCRIPTION,
@@ -4090,6 +4091,33 @@ function parseSinceParam(raw: unknown): Date | null {
 // Both `source_id` and `all_sources` are params so per-call overrides work.
 // ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve the index-age stamp for a code-* envelope.
+ *
+ * Single home for what were six copy-pasted import+resolve blocks, two of them
+ * carrying the same seven-line rationale verbatim. The rationale, once:
+ *
+ * Index age is resolved OUTSIDE `getCachedOrCompute` on purpose. A traversal
+ * may be served from cache long after it was computed, so a freshness stamp
+ * baked into the cached value is exactly the age that silently freezes. It is
+ * re-read per call — one query on a tenancy table — and attached at the
+ * envelope's TOP LEVEL so it is present on the not_found / ambiguous /
+ * unsupported_language results too, which are the empty answers most likely to
+ * be a stale index rather than a real miss.
+ *
+ * The import stays dynamic to match this module's convention (operations.ts
+ * defers ~100 module loads, including the sibling `code-graph-readiness.ts`
+ * probe resolved on the adjacent line) rather than the eager style used by the
+ * `src/commands/` CLI entry points.
+ */
+async function codeIndexFreshnessFor(
+  engine: Parameters<typeof import('./code-index-freshness.ts')['resolveCodeIndexFreshness']>[0],
+  opts: Parameters<typeof import('./code-index-freshness.ts')['resolveCodeIndexFreshness']>[1],
+) {
+  const { resolveCodeIndexFreshness } = await import('./code-index-freshness.ts');
+  return await resolveCodeIndexFreshness(engine, opts);
+}
+
 const code_callers: Operation = {
   name: 'code_callers',
   description: CODE_CALLERS_DESCRIPTION,
@@ -4116,7 +4144,11 @@ const code_callers: Operation = {
     const readiness = await resolveCodeReadiness(ctx.engine, {
       kind: 'edge', count: edges.length, sourceId, allSources,
     });
-    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, callers: edges };
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, {
+      contributingSourceIds: edges.map((e) => e.source_id),
+      sourceId, allSources,
+    });
+    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, index_freshness, callers: edges };
   },
   cliHints: { name: 'code_callers', hidden: true },
 };
@@ -4146,7 +4178,11 @@ const code_callees: Operation = {
     const readiness = await resolveCodeReadiness(ctx.engine, {
       kind: 'edge', count: edges.length, sourceId, allSources,
     });
-    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, callees: edges };
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, {
+      contributingSourceIds: edges.map((e) => e.source_id),
+      sourceId, allSources,
+    });
+    return { symbol, count: edges.length, status: readiness.status, ready: readiness.ready, index_freshness, callees: edges };
   },
   cliHints: { name: 'code_callees', hidden: true },
 };
@@ -4169,7 +4205,10 @@ const code_def: Operation = {
     // code_def is brain-wide (not source-scoped); readiness is 'symbol' grain.
     const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
     const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: defs.length });
-    return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, defs };
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, {
+      contributingSourceIds: defs.map((d) => d.source_id),
+    });
+    return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, index_freshness, defs };
   },
   cliHints: { name: 'code_def', hidden: true },
 };
@@ -4192,7 +4231,10 @@ const code_refs: Operation = {
     // code_refs is brain-wide (not source-scoped); readiness is 'symbol' grain.
     const { resolveCodeReadiness } = await import('./code-graph-readiness.ts');
     const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: refs.length });
-    return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, refs };
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, {
+      contributingSourceIds: refs.map((r) => r.source_id),
+    });
+    return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, index_freshness, refs };
   },
   cliHints: { name: 'code_refs', hidden: true },
 };
@@ -4201,7 +4243,7 @@ const code_refs: Operation = {
 
 const code_blast: Operation = {
   name: 'code_blast',
-  description: 'BEFORE editing any function, run code_blast with the symbol name to surface every transitive caller grouped by depth (direct → 2-hop → 3-hop). Use this during plan-mode to size the change. Returns up to 200 nodes. Returns: {result, depth_groups?, truncation?, cycles_detected?, did_you_mean?, candidates?}. Example ok: {result:"ok", depth_groups:[{depth:1, nodes:[{symbol,chunk_id}], confidence:0.77}], truncation:"none"}.',
+  description: 'BEFORE editing any function, run code_blast with the symbol name to surface every transitive caller grouped by depth (direct → 2-hop → 3-hop). Use this during plan-mode to size the change. Returns up to 200 nodes. Returns: {result, depth_groups?, truncation?, cycles_detected?, did_you_mean?, candidates?, index_freshness}. Example ok: {result:"ok", depth_groups:[{depth:1, nodes:[{symbol,chunk_id}], confidence:0.77}], truncation:"none"}. ' + CODE_INDEX_FRESHNESS_CLAUSE,
   params: {
     symbol: { type: 'string', required: true, description: 'Bare or qualified symbol name (e.g. "performSync" or "src/foo::performSync")' },
     depth: { type: 'number', description: 'Hop cap (default 5, max 8)' },
@@ -4223,7 +4265,7 @@ const code_blast: Operation = {
     // exactly preserving pre-fix local behavior.
     const { sourceId: scopedSourceId } = resolveCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    return getCachedOrCompute(
+    const walk = await getCachedOrCompute(
       ctx.engine,
       { symbol_qualified: symbol, depth, source_id: sourceId },
       () => runRecursiveWalk(ctx.engine, symbol, {
@@ -4234,13 +4276,17 @@ const code_blast: Operation = {
         exact,
       }),
     );
+    // See codeIndexFreshnessFor: resolved outside getCachedOrCompute so a
+    // cache-served walk never carries a frozen stamp.
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, { sourceId });
+    return { ...walk, index_freshness };
   },
   cliHints: { name: 'code_blast', hidden: true },
 };
 
 const code_flow: Operation = {
   name: 'code_flow',
-  description: 'When tracing how a request flows through the codebase from entry point to side effect (DB write, HTTP call, file I/O), run code_flow from the entry point. Returns ordered execution chain with terminal-node tags. Returns: same envelope as code_blast plus terminal_nodes: [{symbol, sink_kind}] where sink_kind ∈ "db_call"|"http_call"|"file_io"|"process_exec"|"unknown".',
+  description: 'When tracing how a request flows through the codebase from entry point to side effect (DB write, HTTP call, file I/O), run code_flow from the entry point. Returns ordered execution chain with terminal-node tags. Returns: same envelope as code_blast (index_freshness included) plus terminal_nodes: [{symbol, sink_kind}] where sink_kind ∈ "db_call"|"http_call"|"file_io"|"process_exec"|"unknown". ' + CODE_INDEX_FRESHNESS_CLAUSE,
   params: {
     entry_point: { type: 'string', required: true, description: 'Entry-point symbol name (bare or qualified)' },
     depth: { type: 'number', description: 'Hop cap (default 8, max 12)' },
@@ -4259,7 +4305,7 @@ const code_flow: Operation = {
     // Single trust+grant resolver (see code_blast).
     const { sourceId: scopedSourceId } = resolveCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    return getCachedOrCompute(
+    const walk = await getCachedOrCompute(
       ctx.engine,
       { symbol_qualified: symbol + ':flow', depth, source_id: sourceId },
       () => runRecursiveWalk(ctx.engine, symbol, {
@@ -4270,6 +4316,10 @@ const code_flow: Operation = {
         exact,
       }),
     );
+    // See codeIndexFreshnessFor: resolved outside getCachedOrCompute so a
+    // cache-served walk never carries a frozen stamp.
+    const index_freshness = await codeIndexFreshnessFor(ctx.engine, { sourceId });
+    return { ...walk, index_freshness };
   },
   cliHints: { name: 'code_flow', hidden: true },
 };
